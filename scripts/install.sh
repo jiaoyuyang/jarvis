@@ -37,10 +37,10 @@ if grep -q '^QWENPAW_AUTH_PASSWORD=CHANGE_ME$' .env; then
   exit 1
 fi
 
-mkdir -p runtime/data runtime/secrets runtime/backups
-chmod 700 runtime/secrets runtime/backups
+mkdir -p runtime/data runtime/secrets runtime/backups runtime/codex runtime/import-staging
+chmod 700 runtime/secrets runtime/backups runtime/codex runtime/import-staging
 
-docker compose pull jarvis
+docker compose build --pull jarvis
 docker compose up -d jarvis
 
 echo "Waiting for Jarvis health check..."
@@ -70,4 +70,9 @@ echo "Console on server: http://127.0.0.1:${PORT}"
 echo "Use an SSH tunnel from your computer:"
 echo "  ssh -L ${PORT}:127.0.0.1:${PORT} ubuntu@YOUR_SERVER_IP"
 echo "Login values are stored in ${PROJECT_DIR}/.env"
-
+echo
+echo "Codex is installed but is not enabled until ChatGPT OAuth succeeds."
+echo "Next steps:"
+echo "  ./scripts/codex-login.sh"
+echo "  ./scripts/enable-codex.sh"
+echo "  ./scripts/codex-status.sh"

@@ -6,6 +6,7 @@ PROJECT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 cd "$PROJECT_DIR"
 
 mkdir -p runtime/backups/manual
+mkdir -p runtime/codex
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 ARCHIVE="runtime/backups/manual/jarvis-${STAMP}.tar.gz"
 
@@ -21,7 +22,7 @@ if [[ "$WAS_RUNNING" == "true" ]]; then
   docker compose stop jarvis >/dev/null
 fi
 
-tar --exclude='backups/manual' -czf "$ARCHIVE" -C runtime data secrets backups
+tar --exclude='backups/manual' -czf "$ARCHIVE" -C runtime data secrets backups codex
 sha256sum "$ARCHIVE" > "${ARCHIVE}.sha256"
 chmod 600 "$ARCHIVE" "${ARCHIVE}.sha256"
 

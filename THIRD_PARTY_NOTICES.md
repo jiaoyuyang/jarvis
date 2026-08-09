@@ -9,3 +9,10 @@ Jarvis uses the official QwenPaw container image as its runtime base.
 
 QwenPaw and the software distributed in its container image retain their original copyright and license notices. Jarvis does not claim ownership of QwenPaw.
 
+Jarvis also installs the optional OpenAI Codex runtime expected by the selected
+QwenPaw release.
+
+- Project: OpenAI Codex
+- Source: https://github.com/openai/codex
+- Package: `openai-codex==0.144.4`
+- License: Apache License 2.0

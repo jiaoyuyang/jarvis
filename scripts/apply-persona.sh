@@ -21,6 +21,15 @@ docker compose exec -T -e JARVIS_PERSONA_TARGET="$TARGET" jarvis sh -eu -c '
     fi
     cp "/opt/jarvis/persona/$name" "$target/$name"
   done
+  mkdir -p "$target/knowledge" "$target/memory/inbox" "$target/skills"
+  if test -d /opt/jarvis/skills/jarvis-memory; then
+    if test -d "$target/skills/jarvis-memory"; then
+      cp -R "$target/skills/jarvis-memory" \
+        "$target/skills/jarvis-memory.before-jarvis-$stamp"
+    fi
+    rm -rf "$target/skills/jarvis-memory"
+    cp -R /opt/jarvis/skills/jarvis-memory "$target/skills/jarvis-memory"
+  fi
 '
 
 docker compose exec -T -e JARVIS_AGENT_CONFIG="$TARGET/agent.json" jarvis python - <<'PY'

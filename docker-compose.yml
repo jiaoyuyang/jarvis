@@ -1,6 +1,12 @@
 services:
   jarvis:
-    image: ${QWENPAW_IMAGE:-agentscope/qwenpaw:latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        QWENPAW_IMAGE: ${QWENPAW_IMAGE:-agentscope/qwenpaw:v2.1.0-beta.2}
+        OPENAI_CODEX_VERSION: ${OPENAI_CODEX_VERSION:-0.144.4}
+    image: ${JARVIS_IMAGE:-jarvis:qwenpaw-2.1-codex}
     container_name: jarvis
     init: true
     restart: unless-stopped
@@ -15,12 +21,16 @@ services:
       QWENPAW_TOOL_GUARD_ENABLED: "true"
       QWENPAW_SKILL_SCAN_MODE: block
       QWENPAW_LOG_LEVEL: ${QWENPAW_LOG_LEVEL:-info}
+      CODEX_HOME: /root/.codex
       TZ: ${TZ:-Asia/Shanghai}
     volumes:
       - ./runtime/data:/app/working
       - ./runtime/secrets:/app/working.secret
       - ./runtime/backups:/app/working.backups
+      - ./runtime/codex:/root/.codex
+      - ./runtime/import-staging:/app/import-staging:ro
       - ./persona:/opt/jarvis/persona:ro
+      - ./skills:/opt/jarvis/skills:ro
     healthcheck:
       test:
         - CMD
@@ -35,4 +45,3 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
-
