@@ -17,8 +17,8 @@ Jarvis 是从 `codex-dingtalk` 演进而来的个人智能助理项目。当前�
 - `plugins/`：能力匹配插件
 - `gateway/`：HTTP Gateway 原型与部署样例
 - `render/`：卡片与 Markdown 渲染
-- `tools/`：健康检查、回归检查及运维脚本
-- `docs/`：运行手册、变更记录和架构状态说明
+- `tools/`：PPT 渲染、插件测试和摘要维护工具
+- `docs/`：数据迁移契约和通用格式说明
 
 ## 安全边界
 
@@ -28,6 +28,7 @@ Jarvis 是从 `codex-dingtalk` 演进而来的个人智能助理项目。当前�
 - 任务数据库、聊天历史、用户记忆和上传文件
 - 运行日志、缓存、备份、重启请求和回滚状态
 - Codex 本地运行目录及安装标识
+- 生产环境运维手册、服务器拓扑、回滚凭据及个人上下文
 
 ## V1 演进原则
 
@@ -38,3 +39,7 @@ Jarvis 是从 `codex-dingtalk` 演进而来的个人智能助理项目。当前�
 5. 不引入新的 Agent 框架或多 Agent 自治。
 
 > 当前仓库是迁移基线，不代表已完成 Jarvis V1 安全加固。生产部署前必须完成身份白名单、最小权限、下载边界和自维护权限隔离。
+
+## 配置与迁移
+
+生产环境必须通过 `JARVIS_DATA_DIR`、`JARVIS_MEMORY_DIR` 和 `JARVIS_WORKSPACE` 将私有运行数据放在 Git 仓库之外。部署和迁移步骤见 `docs/MIGRATION.md`。
