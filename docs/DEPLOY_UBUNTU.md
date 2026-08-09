@@ -6,7 +6,7 @@
 - Docker Engine
 - Docker Compose Plugin
 - 当前用户可执行 `docker info`
-- 服务器能够访问 Docker Hub 或 AgentScope 阿里云镜像仓库
+- 服务器能够通过现有 Mihomo 访问 Docker Hub
 - 服务器既有 `mihomo.service` 正常运行，本地代理为 `127.0.0.1:7890`
 
 不要在部署前删除旧 `codex-dingtalk`。新 Jarvis 使用独立容器、端口和目录，可以并行验证。
@@ -32,11 +32,11 @@ chmod +x scripts/*.sh
 现有 ChatGPT 账号确认即可。OAuth 数据保存在 `runtime/codex/`，容器重启
 和重新构建不会丢失。
 
-默认已经使用 AgentScope 阿里云镜像，并通过服务器现有 Mihomo 完成构建和
-Codex 运行时访问：
+默认使用 AgentScope 官方 Docker Hub 镜像，并通过服务器现有 Mihomo 完成
+镜像下载、构建和 Codex 运行时访问：
 
 ```dotenv
-QWENPAW_IMAGE=agentscope-registry.ap-southeast-1.cr.aliyuncs.com/agentscope/qwenpaw:v2.1.0-beta.2
+QWENPAW_IMAGE=docker.io/agentscope/qwenpaw:v2.1.0-beta.2
 JARVIS_HTTP_PROXY=http://127.0.0.1:7890
 JARVIS_HTTPS_PROXY=http://127.0.0.1:7890
 JARVIS_ALL_PROXY=socks5h://127.0.0.1:7890
@@ -53,7 +53,7 @@ Jarvis 环境，并创建 `/etc/systemd/system/docker.service.d/jarvis-proxy.con
 随后重启一次 Docker，使基础镜像的鉴权与下载也经过代理。该操作不会删除
 容器数据、Jarvis 知识或记忆；升级脚本会自动执行这一步。
 
-脚本不会修改 `/etc/mihomo/config.yaml`、订阅、节点选择或 systemd。正常线路
+脚本不会修改 `/etc/mihomo/config.yaml`、订阅、节点选择或 `mihomo.service`。正常线路
 为“梯子猫 → TW｜台湾 01”；只有主线路连续异常时才按既有运维规则切换到
 一元机场。
 
@@ -77,7 +77,7 @@ chmod +x scripts/*.sh
 ```
 
 升级脚本先制作停机一致性备份，再构建新镜像。它不会在 OAuth 成功前强制
-切换后端。构建过程中基础镜像走 AgentScope 阿里云仓库，`apt`、PyPI 和
+切换后端。构建过程中基础镜像走 AgentScope 官方 Docker Hub 仓库，`apt`、PyPI 和
 容器内 Codex 通过 `127.0.0.1:7890` 访问现有 Mihomo。构建完成后执行：
 
 ```bash
