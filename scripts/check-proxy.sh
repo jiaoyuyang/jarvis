@@ -28,7 +28,6 @@ check_url() {
   echo "$name=http-$code"
 }
 
-check_url aliyun-registry https://agentscope-registry.ap-southeast-1.cr.aliyuncs.com/v2/
 check_url docker-hub https://registry-1.docker.io/v2/
 check_url pypi https://pypi.org/simple/openai-codex/
 check_url openai-auth https://auth.openai.com/
