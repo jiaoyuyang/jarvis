@@ -5,7 +5,7 @@ services:
       dockerfile: Dockerfile
       network: host
       args:
-        QWENPAW_IMAGE: ${QWENPAW_IMAGE:-agentscope-registry.ap-southeast-1.cr.aliyuncs.com/agentscope/qwenpaw:v2.1.0-beta.2}
+        QWENPAW_IMAGE: ${QWENPAW_IMAGE:-docker.io/agentscope/qwenpaw:v2.1.0-beta.2}
         OPENAI_CODEX_VERSION: ${OPENAI_CODEX_VERSION:-0.144.4}
         HTTP_PROXY: ${JARVIS_HTTP_PROXY:-http://127.0.0.1:7890}
         HTTPS_PROXY: ${JARVIS_HTTPS_PROXY:-http://127.0.0.1:7890}
