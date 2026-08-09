@@ -10,7 +10,7 @@ services:
         HTTP_PROXY: ${JARVIS_HTTP_PROXY:-http://127.0.0.1:7890}
         HTTPS_PROXY: ${JARVIS_HTTPS_PROXY:-http://127.0.0.1:7890}
         ALL_PROXY: ${JARVIS_ALL_PROXY:-socks5h://127.0.0.1:7890}
-        NO_PROXY: ${JARVIS_NO_PROXY:-127.0.0.1,localhost,.dingtalk.com,.aliyuncs.com}
+        NO_PROXY: ${JARVIS_NO_PROXY:-127.0.0.1,localhost,::1,.dingtalk.com}
     image: ${JARVIS_IMAGE:-jarvis:qwenpaw-2.1-codex}
     container_name: jarvis
     init: true
@@ -33,11 +33,11 @@ services:
       HTTP_PROXY: ${JARVIS_HTTP_PROXY:-http://127.0.0.1:7890}
       HTTPS_PROXY: ${JARVIS_HTTPS_PROXY:-http://127.0.0.1:7890}
       ALL_PROXY: ${JARVIS_ALL_PROXY:-socks5h://127.0.0.1:7890}
-      NO_PROXY: ${JARVIS_NO_PROXY:-127.0.0.1,localhost,.dingtalk.com,.aliyuncs.com}
+      NO_PROXY: ${JARVIS_NO_PROXY:-127.0.0.1,localhost,::1,.dingtalk.com}
       http_proxy: ${JARVIS_HTTP_PROXY:-http://127.0.0.1:7890}
       https_proxy: ${JARVIS_HTTPS_PROXY:-http://127.0.0.1:7890}
       all_proxy: ${JARVIS_ALL_PROXY:-socks5h://127.0.0.1:7890}
-      no_proxy: ${JARVIS_NO_PROXY:-127.0.0.1,localhost,.dingtalk.com,.aliyuncs.com}
+      no_proxy: ${JARVIS_NO_PROXY:-127.0.0.1,localhost,::1,.dingtalk.com}
       TZ: ${TZ:-Asia/Shanghai}
     volumes:
       - ./runtime/data:/app/working
