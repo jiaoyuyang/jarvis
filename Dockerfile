@@ -1,4 +1,4 @@
-ARG QWENPAW_IMAGE=agentscope/qwenpaw:v2.1.0-beta.2
+ARG QWENPAW_IMAGE=agentscope-registry.ap-southeast-1.cr.aliyuncs.com/agentscope/qwenpaw:v2.1.0-beta.2
 FROM ${QWENPAW_IMAGE}
 
 ARG OPENAI_CODEX_VERSION=0.144.4
@@ -6,7 +6,12 @@ ARG OPENAI_CODEX_VERSION=0.144.4
 # QwenPaw keeps third-party runtimes optional. Install the exact Codex
 # version pinned by the selected QwenPaw release, plus ripgrep for the
 # local knowledge-search skill.
-RUN apt-get update \
+RUN sed -i \
+        's/qwenpaw app --host 0.0.0.0/qwenpaw app --host 127.0.0.1/' \
+        /etc/supervisor/conf.d/supervisord.conf.template \
+    && grep -q 'qwenpaw app --host 127.0.0.1' \
+        /etc/supervisor/conf.d/supervisord.conf.template \
+    && apt-get update \
     && apt-get install -y --no-install-recommends ripgrep \
     && rm -rf /var/lib/apt/lists/* \
     && /app/venv/bin/python -m pip install --no-cache-dir \

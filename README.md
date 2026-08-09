@@ -23,6 +23,10 @@ Jarvis 是焦玉阳的 7x24 个人智能助理。本仓库不再自研通用 Age
    OpenAI Platform 计费。
 5. **旧服务器最后退役**：完成备份、恢复和验收前不删除旧环境。
 
+腾讯云部署使用服务器既有 Mihomo：本地代理 `127.0.0.1:7890`。镜像基础层
+从 AgentScope 阿里云仓库拉取；构建和运行阶段通过 host 网络复用 Mihomo。
+自定义镜像强制 QwenPaw 只监听 `127.0.0.1`，不会因为 host 网络暴露控制台。
+
 ## 目标架构
 
 QwenPaw 负责钉钉入口、会话、权限和工具管理；默认 Jarvis 智能体直接使用
@@ -86,6 +90,10 @@ chmod +x scripts/*.sh
 ./scripts/codex-status.sh
 ```
 
+升级脚本会先检查 Mihomo、Docker Hub、PyPI 和 OpenAI 登录站点的代理
+连通性，并更新私有 `.env`。它不会修改 Mihomo 配置，也不会自动切换梯子猫
+或一元机场线路。
+
 详细步骤见 [Ubuntu 部署](docs/DEPLOY_UBUNTU.md) 和 [验收清单](docs/ACCEPTANCE.md)。旧系统知识和记忆迁移见 [迁移边界](docs/MIGRATION.md)。
 
 ## 常用命令
@@ -95,6 +103,7 @@ chmod +x scripts/*.sh
 ./scripts/backup.sh
 ./scripts/apply-persona.sh
 ./scripts/codex-status.sh
+./scripts/check-proxy.sh
 ./scripts/migrate-legacy-knowledge.sh --dry-run
 docker compose logs -f --tail=200 jarvis
 docker compose restart jarvis

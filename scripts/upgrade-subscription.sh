@@ -10,6 +10,8 @@ if docker inspect jarvis >/dev/null 2>&1; then
   "$SCRIPT_DIR/backup.sh"
 fi
 
+"$SCRIPT_DIR/enable-server-proxy.sh"
+
 if [[ -f .env ]]; then
   CURRENT_IMAGE="$(sed -n 's/^QWENPAW_IMAGE=//p' .env | tail -1)"
   case "$CURRENT_IMAGE" in

@@ -3,15 +3,22 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      network: host
       args:
-        QWENPAW_IMAGE: ${QWENPAW_IMAGE:-agentscope/qwenpaw:v2.1.0-beta.2}
+        QWENPAW_IMAGE: ${QWENPAW_IMAGE:-agentscope-registry.ap-southeast-1.cr.aliyuncs.com/agentscope/qwenpaw:v2.1.0-beta.2}
         OPENAI_CODEX_VERSION: ${OPENAI_CODEX_VERSION:-0.144.4}
+        HTTP_PROXY: ${JARVIS_HTTP_PROXY:-http://127.0.0.1:7890}
+        HTTPS_PROXY: ${JARVIS_HTTPS_PROXY:-http://127.0.0.1:7890}
+        ALL_PROXY: ${JARVIS_ALL_PROXY:-socks5h://127.0.0.1:7890}
+        NO_PROXY: ${JARVIS_NO_PROXY:-127.0.0.1,localhost,.dingtalk.com,.aliyuncs.com}
     image: ${JARVIS_IMAGE:-jarvis:qwenpaw-2.1-codex}
     container_name: jarvis
     init: true
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:${JARVIS_PORT:-8088}:8088"
+    # Host networking lets both the image build and Codex reach the existing
+    # Mihomo proxy on 127.0.0.1:7890. The custom image forces QwenPaw itself
+    # to bind only 127.0.0.1, so the console is not exposed publicly.
+    network_mode: host
     environment:
       QWENPAW_WORKING_DIR: /app/working
       QWENPAW_SECRET_DIR: /app/working.secret
@@ -21,7 +28,16 @@ services:
       QWENPAW_TOOL_GUARD_ENABLED: "true"
       QWENPAW_SKILL_SCAN_MODE: block
       QWENPAW_LOG_LEVEL: ${QWENPAW_LOG_LEVEL:-info}
+      QWENPAW_PORT: ${JARVIS_PORT:-8088}
       CODEX_HOME: /root/.codex
+      HTTP_PROXY: ${JARVIS_HTTP_PROXY:-http://127.0.0.1:7890}
+      HTTPS_PROXY: ${JARVIS_HTTPS_PROXY:-http://127.0.0.1:7890}
+      ALL_PROXY: ${JARVIS_ALL_PROXY:-socks5h://127.0.0.1:7890}
+      NO_PROXY: ${JARVIS_NO_PROXY:-127.0.0.1,localhost,.dingtalk.com,.aliyuncs.com}
+      http_proxy: ${JARVIS_HTTP_PROXY:-http://127.0.0.1:7890}
+      https_proxy: ${JARVIS_HTTPS_PROXY:-http://127.0.0.1:7890}
+      all_proxy: ${JARVIS_ALL_PROXY:-socks5h://127.0.0.1:7890}
+      no_proxy: ${JARVIS_NO_PROXY:-127.0.0.1,localhost,.dingtalk.com,.aliyuncs.com}
       TZ: ${TZ:-Asia/Shanghai}
     volumes:
       - ./runtime/data:/app/working
@@ -36,7 +52,7 @@ services:
         - CMD
         - python
         - -c
-        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8088/api/healthz', timeout=5)"
+        - "import os, urllib.request; port=os.environ.get('QWENPAW_PORT','8088'); urllib.request.urlopen(f'http://127.0.0.1:{port}/api/healthz', timeout=5)"
       interval: 15s
       timeout: 8s
       retries: 20

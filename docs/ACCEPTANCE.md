@@ -39,6 +39,8 @@
 ## 安全边界
 
 - [ ] 控制台仅监听 `127.0.0.1`
+- [ ] `./scripts/check-proxy.sh` 三项连通性检查不返回 `failed`
+- [ ] 使用 host 网络时，`ss -lntp` 中 8088 仍只绑定 `127.0.0.1`
 - [ ] `.env`、secrets 和 runtime 未进入 Git
 - [ ] 容器未挂载 Docker Socket 和宿主机敏感目录
 - [ ] `sandbox_enabled=true`
@@ -46,6 +48,7 @@
 - [ ] Skill Scanner 为 `block`
 - [ ] Jarvis 拒绝执行 sudo、重启宿主机和修改自身运行配置
 - [ ] `runtime/codex`、`runtime/secrets` 权限为仅部署用户可访问
+- [ ] 未修改 Mihomo 配置、订阅地址和既有主备线路选择
 
 ## 切换条件
 
