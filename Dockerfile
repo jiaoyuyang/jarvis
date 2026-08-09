@@ -1,4 +1,4 @@
-ARG QWENPAW_IMAGE=agentscope-registry.ap-southeast-1.cr.aliyuncs.com/agentscope/qwenpaw:v2.1.0-beta.2
+ARG QWENPAW_IMAGE=docker.io/agentscope/qwenpaw:v2.1.0-beta.2
 FROM ${QWENPAW_IMAGE}
 
 ARG OPENAI_CODEX_VERSION=0.144.4
