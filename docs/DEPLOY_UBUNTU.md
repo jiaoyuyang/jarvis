@@ -43,11 +43,19 @@ ssh -L 8088:127.0.0.1:8088 ubuntu@YOUR_SERVER_IP
 
 1. 设置 → 模型：添加模型供应商和 API Key，并选择活动模型。
 2. 控制台对话：发送“你是谁”，确认回复正常。
-3. 控制 → 频道 → DingTalk：启用频道并填写 Client ID、Client Secret。
+3. 控制 → 频道 → DingTalk：启用频道并填写 Client ID、Client Secret；关闭“显示思考过程”“显示工具调用信息”和“显示工具结果信息”。
 4. 钉钉开发者后台确认机器人使用 Stream 模式。
 5. 在钉钉单聊机器人执行验收清单。
 
 不要把真实 Client Secret 或模型 API Key 写入 Git 仓库、部署文档或聊天截图。
+
+如果控制台仍显示 `Default`/`QwenPaw` 而不是 Jarvis，重新应用默认智能体配置：
+
+```bash
+./scripts/apply-persona.sh
+./scripts/harden-security.sh
+docker compose restart jarvis
+```
 
 ## 5. 运维
 
@@ -59,4 +67,3 @@ docker compose restart jarvis
 ```
 
 升级前先备份。V1 验证期间不要使用无版本控制的清理脚本，也不要挂载 `/var/run/docker.sock`、`/opt`、`/home/ubuntu` 或宿主机根目录到容器。
-
