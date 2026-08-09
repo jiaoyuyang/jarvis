@@ -1,34 +1,32 @@
-# Runtime data migration
+# 旧 Jarvis 数据迁移边界
 
-Jarvis treats source code and private runtime data as two separate assets. A deployment may replace the Git checkout, but it must never overwrite or delete the persistent data directories.
+## 当前阶段
 
-## Persistent directories
+V1 首次部署只验证 QwenPaw 主链，不直接导入旧生产记忆。旧系统继续只读保留，避免未经验证的格式转换污染新记忆。
 
-- `JARVIS_DATA_DIR`: task database, recent history, summaries and memory candidates.
-- `JARVIS_MEMORY_DIR`: confirmed long-term knowledge and user preferences.
-- `JARVIS_WORKSPACE`: uploads, generated files and task workspace.
-- Server-side `.env`: credentials and deployment-specific configuration.
+## 必须保留的旧数据
 
-These locations must not be committed to Git.
+- `/opt/codex-dingtalk/data`
+- `/opt/codex-dingtalk/memory`
+- `/opt/codex-workspace`
+- `/opt/codex-dingtalk/.env`，仅作为加密私密备份，不进入 Git
 
-## Safe deployment sequence
+实际路径以旧服务器只读检查结果为准。备份时必须记录文件数量、总大小和 SHA-256 校验值。
 
-1. Keep the current service and server available.
-2. Create a timestamped archive of every persistent directory and the server-side environment file.
-3. Copy the archive to storage that will survive replacement of the old server.
-4. Deploy the new Git checkout into a separate application directory.
-5. Configure `JARVIS_DATA_DIR`, `JARVIS_MEMORY_DIR` and `JARVIS_WORKSPACE` to point at restored or existing persistent directories.
-6. Start the new service and verify health, memory retrieval, file handling and DingTalk replies.
-7. Keep the old service and backup available until acceptance tests pass.
-8. Delete the old server only after a restore test confirms the backup is usable.
+## 迁移顺序
 
-## Required acceptance checks
+1. 停止旧系统的记忆写入，或在一致性时间点制作快照。
+2. 制作完整原始备份，保留一份不参与转换的副本。
+3. 盘点长期记忆、会话、任务、知识文件和上传文件。
+4. 转换为 QwenPaw 可读取的 Markdown/资源目录，写入新环境的临时导入区。
+5. 校验数量、关键事实、日期、来源和中文编码。
+6. 由用户抽样确认后再建立 ReMe 索引。
+7. 完成备份恢复演练后才允许退役旧服务器。
 
-- The task database opens without migration errors.
-- Recent conversation history is available.
-- A known long-term preference can be retrieved from the memory directory.
-- A new memory candidate can be created and confirmed.
-- DingTalk text, image and file flows still work.
-- Generated outputs remain inside the configured workspace.
-- The service can be rolled back without modifying the persistent directories.
+## 明确禁止
+
+- 不把旧 `.env`、API Key、钉钉密钥提交到 GitHub。
+- 不直接用转换结果覆盖唯一原件。
+- 不把全部聊天记录无差别写入长期记忆。
+- 不在旧服务器删除前跳过恢复演练。
 

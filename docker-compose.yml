@@ -1,0 +1,38 @@
+services:
+  jarvis:
+    image: ${QWENPAW_IMAGE:-agentscope/qwenpaw:latest}
+    container_name: jarvis
+    init: true
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${JARVIS_PORT:-8088}:8088"
+    environment:
+      QWENPAW_WORKING_DIR: /app/working
+      QWENPAW_SECRET_DIR: /app/working.secret
+      QWENPAW_AUTH_ENABLED: "true"
+      QWENPAW_AUTH_USERNAME: ${QWENPAW_AUTH_USERNAME:?set QWENPAW_AUTH_USERNAME in .env}
+      QWENPAW_AUTH_PASSWORD: ${QWENPAW_AUTH_PASSWORD:?set QWENPAW_AUTH_PASSWORD in .env}
+      QWENPAW_TOOL_GUARD_ENABLED: "true"
+      QWENPAW_SKILL_SCAN_MODE: block
+      QWENPAW_LOG_LEVEL: ${QWENPAW_LOG_LEVEL:-info}
+      TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      - ./runtime/data:/app/working
+      - ./runtime/secrets:/app/working.secret
+      - ./runtime/backups:/app/working.backups
+      - ./persona:/opt/jarvis/persona:ro
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8088/api/healthz', timeout=5)"
+      interval: 15s
+      timeout: 8s
+      retries: 20
+      start_period: 60s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+

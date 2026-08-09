@@ -1,55 +1,6 @@
-# Secrets and local configuration
 .env
-.env.*
-!.env.example
-!gateway/.env.example
-*.pem
-*.key
-*.p12
-*.pfx
-
-# Python
-__pycache__/
-*.py[cod]
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.coverage
-htmlcov/
-.venv/
-venv/
-
-# Runtime state and user data
-data/
-memory/**
-!memory/__init__.py
-!memory/context.py
-!memory/README.md
-workspace/
-uploads/
-outputs/
-logs/
-backups/
-.codex-runtime/
-.cache/
-*.sqlite
-*.sqlite3
-*.sqlite-shm
-*.sqlite-wal
-*.db
-*.lock
-
-# Generated and historical copies
-*.bak
-*.bak.*
-*.stable
-*.stable_*
-*.disabled_*
-*.tmp
+runtime/
+*.tar.gz
 *.log
-
-# IDE and OS
-.idea/
-.vscode/
 .DS_Store
-Thumbs.db
+
