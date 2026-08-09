@@ -48,6 +48,11 @@ JARVIS_ALL_PROXY=socks5h://127.0.0.1:7890
 ./scripts/check-proxy.sh
 ```
 
+首次构建前执行 `./scripts/enable-server-proxy.sh`。它会把 Mihomo 地址写入
+Jarvis 环境，并创建 `/etc/systemd/system/docker.service.d/jarvis-proxy.conf`，
+随后重启一次 Docker，使基础镜像的鉴权与下载也经过代理。该操作不会删除
+容器数据、Jarvis 知识或记忆；升级脚本会自动执行这一步。
+
 脚本不会修改 `/etc/mihomo/config.yaml`、订阅、节点选择或 systemd。正常线路
 为“梯子猫 → TW｜台湾 01”；只有主线路连续异常时才按既有运维规则切换到
 一元机场。
