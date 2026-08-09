@@ -79,7 +79,7 @@ configure_docker_daemon_proxy() {
 }
 
 upsert_env QWENPAW_IMAGE \
-  agentscope-registry.ap-southeast-1.cr.aliyuncs.com/agentscope/qwenpaw:v2.1.0-beta.2
+  docker.io/agentscope/qwenpaw:v2.1.0-beta.2
 upsert_env JARVIS_HTTP_PROXY http://127.0.0.1:7890
 upsert_env JARVIS_HTTPS_PROXY http://127.0.0.1:7890
 upsert_env JARVIS_ALL_PROXY socks5h://127.0.0.1:7890
