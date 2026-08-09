@@ -2,7 +2,7 @@
 
 - Runtime base: `agentscope-ai/QwenPaw`
 - License: Apache-2.0
-- Default image: `agentscope-registry.ap-southeast-1.cr.aliyuncs.com/agentscope/qwenpaw:v2.1.0-beta.2`
+- Default image: `docker.io/agentscope/qwenpaw:v2.1.0-beta.2`
 - Codex runtime: `openai-codex==0.144.4`
 - V1 target: QwenPaw 2.1.0 beta.2, the first official line with direct Codex
   third-party agent backend support
