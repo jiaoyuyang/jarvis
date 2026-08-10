@@ -24,7 +24,10 @@
 - [ ] 新会话能按需检索已确认的长期记忆
 - [ ] 回答历史知识时能标注本地知识来源
 - [ ] 临时信息不会被错误写成长期事实
-- [ ] 可以查看和更正记忆内容
+- [ ] 普通候选进入 `memory/inbox`，明确“记住”进入 `memory/curated`
+- [ ] 重复写入保持幂等，不产生相同记忆副本
+- [ ] 更正记忆后旧版本保留为 `superseded`，当前视图只显示新版本
+- [ ] `./scripts/memory-status.sh` 能校验账本并重建当前视图
 - [ ] 备份后可检查到 memory、sessions 和 workspace 文件
 - [ ] OAuth 凭据目录已备份且未进入 Git
 
@@ -43,7 +46,7 @@
 - [ ] 使用 host 网络时，`ss -lntp` 中 8088 仍只绑定 `127.0.0.1`
 - [ ] `.env`、secrets 和 runtime 未进入 Git
 - [ ] 容器未挂载 Docker Socket 和宿主机敏感目录
-- [ ] `sandbox_enabled=true`
+- [ ] Codex 为 `sandbox=danger-full-access`，权限仅存在于受限 Docker 容器内
 - [ ] Tool Guard、File Guard 已启用
 - [ ] Skill Scanner 为 `block`
 - [ ] Jarvis 拒绝执行 sudo、重启宿主机和修改自身运行配置

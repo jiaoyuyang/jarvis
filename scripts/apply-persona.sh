@@ -58,6 +58,13 @@ if not entry.get("enabled", False):
 print("Enabled workspace skill: jarvis-memory")
 PY
 
+docker compose exec -T -e JARVIS_MEMORY_WORKSPACE="$TARGET" jarvis sh -eu -c '
+  workspace="$JARVIS_MEMORY_WORKSPACE"
+  tool="$workspace/skills/jarvis-memory/scripts/memoryctl.py"
+  test -f "$tool"
+  python "$tool" --workspace "$workspace" verify --rebuild
+'
+
 docker compose exec -T -e JARVIS_AGENT_CONFIG="$TARGET/agent.json" jarvis python - <<'PY'
 import json
 import os
@@ -76,5 +83,5 @@ path.write_text(
 )
 PY
 
-echo "Applied Jarvis persona and enabled jarvis-memory for agent ${AGENT_ID}."
+echo "Applied Jarvis persona and enabled the continuous memory ledger for agent ${AGENT_ID}."
 echo "Start a new channel session with /new so Codex inherits updated Skills."

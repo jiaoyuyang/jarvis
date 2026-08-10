@@ -51,6 +51,29 @@ run_as_root chmod 600 "$ARCHIVE" "${ARCHIVE}.sha256"
 run_as_root chown "$CALLER_UID:$CALLER_GID" \
   "$ARCHIVE" "${ARCHIVE}.sha256"
 
+run_as_root sha256sum --quiet -c "${ARCHIVE}.sha256"
+
+RETENTION="${JARVIS_BACKUP_RETENTION:-}"
+if [[ -z "$RETENTION" && -f .env ]]; then
+  RETENTION_LINE="$(grep -E '^JARVIS_BACKUP_RETENTION=' .env | tail -1 || true)"
+  RETENTION="${RETENTION_LINE#JARVIS_BACKUP_RETENTION=}"
+fi
+RETENTION="${RETENTION:-3}"
+if [[ ! "$RETENTION" =~ ^[0-9]+$ ]] || (( RETENTION < 1 || RETENTION > 30 )); then
+  echo "JARVIS_BACKUP_RETENTION must be an integer between 1 and 30." >&2
+  exit 1
+fi
+
+mapfile -t MANUAL_ARCHIVES < <(
+  find runtime/backups/manual -maxdepth 1 -type f \
+    -name 'jarvis-*.tar.gz' -printf '%f\n' | sort -r
+)
+for (( index=RETENTION; index<${#MANUAL_ARCHIVES[@]}; index++ )); do
+  OLD_ARCHIVE="runtime/backups/manual/${MANUAL_ARCHIVES[$index]}"
+  run_as_root rm -f -- "$OLD_ARCHIVE" "${OLD_ARCHIVE}.sha256"
+  echo "Removed expired backup ${PROJECT_DIR}/${OLD_ARCHIVE}"
+done
+
 restart_if_needed
 trap - EXIT
 
