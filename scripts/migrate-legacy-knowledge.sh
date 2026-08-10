@@ -251,39 +251,7 @@ BYTE_COUNT="$(du -sb "$ARCHIVE_ROOT" | awk '{print $1}')"
 ) > "$CHECKSUMS"
 
 if [[ "$USE_CONTAINER_COPY" == true ]]; then
-  echo "Granting the container read-only access to filtered staging..."
-  run_as_root chgrp -R 0 "$STAGING_ROOT"
-  run_as_root chmod -R u=rwX,g=rX,o= "$STAGING_ROOT"
-
-  echo "Installing the verified import into the running Jarvis workspace..."
-  docker compose exec -T -e JARVIS_IMPORT_STAMP="$STAMP" jarvis sh -eu -c '
-    stamp="$JARVIS_IMPORT_STAMP"
-    source="/app/import-staging/$stamp"
-    workspace="/app/working/workspaces/default"
-    knowledge="$workspace/knowledge"
-    archive_dest="$knowledge/archive/$stamp"
-    imports_dest="$knowledge/imports/$stamp"
-
-    test -d "$source/archive"
-    test -d "$source/imports"
-    test -f "$source/archive/SHA256SUMS"
-    (
-      cd "$source/archive"
-      sha256sum --quiet -c SHA256SUMS
-    )
-
-    test ! -e "$archive_dest"
-    test ! -e "$imports_dest"
-    mkdir -p "$archive_dest" "$imports_dest" "$workspace/memory/inbox"
-    cp -R "$source/archive/." "$archive_dest/"
-    cp -R "$source/imports/." "$imports_dest/"
-
-    (
-      cd "$archive_dest"
-      sha256sum --quiet -c SHA256SUMS
-    )
-    printf "%s\n" "$stamp" > "$knowledge/LATEST_IMPORT"
-  '
+  bash "$SCRIPT_DIR/install-staged-knowledge.sh" "$STAMP"
 else
   printf '%s\n' "$STAMP" > "$KNOWLEDGE_ROOT/LATEST_IMPORT"
 fi
