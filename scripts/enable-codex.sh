@@ -45,7 +45,14 @@ shutil.copy2(path, path.with_name(f"agent.json.before-codex-{stamp}"))
 data = json.loads(path.read_text(encoding="utf-8"))
 data["backend"] = "codex"
 settings = data.setdefault("backend_settings", {})
-settings["sandbox"] = "workspace-write"
+
+# The Docker container is the security boundary for Codex. The container drops
+# all Linux capabilities, enables no-new-privileges, binds the management
+# console to localhost, and exposes only explicit persistent mounts. Running a
+# second Codex Linux sandbox inside that boundary is unreliable and can deny
+# ordinary reads of the Jarvis workspace. Container mode therefore gives Codex
+# full access inside the container while retaining on-request approval handling.
+settings["sandbox"] = "danger-full-access"
 settings["approval_policy"] = "on-request"
 settings["reasoning_summary"] = "auto"
 
@@ -68,4 +75,5 @@ PY
 
 docker compose restart jarvis >/dev/null
 echo "Jarvis now uses the Codex backend with ChatGPT subscription authentication."
+echo "Security boundary: hardened Docker container; Codex sandbox: danger-full-access."
 echo "Run ./scripts/codex-status.sh to verify the active backend."
