@@ -24,8 +24,9 @@ docker compose exec -T -e JARVIS_PERSONA_TARGET="$TARGET" jarvis sh -eu -c '
   mkdir -p "$target/knowledge" "$target/memory/inbox" "$target/skills"
   if test -d /opt/jarvis/skills/jarvis-memory; then
     if test -d "$target/skills/jarvis-memory"; then
-      cp -R "$target/skills/jarvis-memory" \
-        "$target/skills/jarvis-memory.before-jarvis-$stamp"
+      backup_root="$target/backups/persona/$stamp"
+      mkdir -p "$backup_root"
+      cp -R "$target/skills/jarvis-memory" "$backup_root/jarvis-memory"
     fi
     rm -rf "$target/skills/jarvis-memory"
     cp -R /opt/jarvis/skills/jarvis-memory "$target/skills/jarvis-memory"
