@@ -95,8 +95,9 @@ metadata:
 - 用户对既有事实的明确纠正；
 - 可在多项任务中复用的方法和规则。
 
-有候选时，在发送最终答复前静默写入；没有候选时不创建空记录。不要保存整段
-聊天原文，只保存一条可独立理解的简洁结论。自动回写不向钉钉发送进度消息。
+有候选时，在形成最终答复后、发送答复前静默写入；没有候选时不调用工具、不创建
+空记录。不要保存整段聊天原文、模型最终答复或重复的历史事实，只保存可以脱离当前
+对话独立理解的简洁结论。自动回写不向钉钉发送进度消息。
 
 工具位置：
 
@@ -104,7 +105,35 @@ metadata:
 MEMORY_TOOL="skills/jarvis-memory/scripts/memoryctl.py"
 ```
 
-普通会话产生的候选先进入收件箱：
+一轮有多个候选时，优先使用单次收口命令。JSON 只通过标准输入传入，不能把用户
+原文拼接成可执行 Shell：
+
+```bash
+python "$MEMORY_TOOL" --workspace . close-turn <<'JARVIS_MEMORY_JSON'
+{
+  "source": "钉钉当前会话；用户明确陈述",
+  "candidates": [
+    {
+      "mode": "confirmed",
+      "type": "preference",
+      "category": "preferences",
+      "key": "preference.example.concise_output",
+      "content": "用户偏好简洁且结论先行的答复"
+    }
+  ]
+}
+JARVIS_MEMORY_JSON
+```
+
+`mode` 的语义必须严格区分：
+
+- `remember`：用户明确要求“记住”“以后都这样”，直接形成有效长期记忆；
+- `confirmed`：用户明确陈述的稳定内容，进入已确认候选层；
+- `pending`：模型归纳且仍需核对，只进入待确认候选层。
+
+一次性格式调整、临时任务、寒暄、模型建议和未形成结论的讨论不得作为候选。每轮
+最多 8 条；工具会统一做敏感信息拒绝、去重、冲突检测和追加式记录。只需单条时也
+可继续使用 `capture`：
 
 ```bash
 python "$MEMORY_TOOL" --workspace . capture \

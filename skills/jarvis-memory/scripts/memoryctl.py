@@ -38,6 +38,9 @@ CATEGORIES = (
     "other",
 )
 STATUSES = ("pending", "confirmed", "active", "superseded", "retired")
+TURN_MODES = ("pending", "confirmed", "remember")
+MAX_TURN_CANDIDATES = 8
+MAX_TURN_PAYLOAD_BYTES = 32768
 DEFAULT_CATEGORY = {
     "fact": "profile",
     "preference": "preferences",
@@ -390,6 +393,135 @@ def command_capture(args: argparse.Namespace, memory_root: Path) -> None:
     print(f"captured={record['id']} status={status}")
 
 
+def command_close_turn(args: argparse.Namespace, memory_root: Path) -> None:
+    raw = sys.stdin.buffer.read(MAX_TURN_PAYLOAD_BYTES + 1)
+    if len(raw) > MAX_TURN_PAYLOAD_BYTES:
+        raise ValueError("单轮记忆候选超过32KB")
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"单轮记忆候选不是有效JSON: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("单轮记忆候选必须是JSON对象")
+
+    source = normalize_text(
+        str(payload.get("source") or "钉钉当前会话；自动收口"),
+        field="source",
+        max_length=500,
+    )
+    candidates = payload.get("candidates")
+    if not isinstance(candidates, list):
+        raise ValueError("candidates必须是JSON数组")
+    if len(candidates) > MAX_TURN_CANDIDATES:
+        raise ValueError(f"每轮最多{MAX_TURN_CANDIDATES}条记忆候选")
+    if not candidates:
+        print("turn_closed=empty")
+        return
+
+    ledger = memory_root / "ledger.jsonl"
+    records = build_state(read_ledger(ledger))
+    projected = {key: dict(value) for key, value in records.items()}
+    planned: list[dict[str, Any]] = []
+    counts = Counter()
+
+    for index, item in enumerate(candidates, 1):
+        if not isinstance(item, dict):
+            raise ValueError(f"第{index}条候选必须是JSON对象")
+        for required_field in ("type", "key", "content"):
+            if not isinstance(item.get(required_field), str):
+                raise ValueError(f"第{index}条候选{required_field}必须是字符串")
+        for optional_field in ("category", "supersedes", "reason"):
+            if item.get(optional_field) is not None and not isinstance(
+                item[optional_field], str
+            ):
+                raise ValueError(f"第{index}条候选{optional_field}必须是字符串")
+        if item.get("mode") is not None and not isinstance(item["mode"], str):
+            raise ValueError(f"第{index}条候选mode必须是字符串")
+        mode = item.get("mode") or "pending"
+        if mode not in TURN_MODES:
+            raise ValueError(f"第{index}条候选mode不受支持: {mode}")
+        namespace = argparse.Namespace(
+            type=item.get("type"),
+            category=item.get("category"),
+            key=item.get("key"),
+            content=item.get("content"),
+            source=source,
+            supersedes=item.get("supersedes"),
+            reason=item.get("reason"),
+        )
+        if namespace.type not in MEMORY_TYPES:
+            raise ValueError(f"第{index}条候选type不受支持: {namespace.type}")
+        if namespace.category is not None and namespace.category not in CATEGORIES:
+            raise ValueError(
+                f"第{index}条候选category不受支持: {namespace.category}"
+            )
+
+        status = "active" if mode == "remember" else mode
+        record = make_record(namespace, status=status)
+        duplicate = duplicate_record(projected, record)
+        if duplicate:
+            if mode == "remember" and duplicate["status"] in (
+                "pending",
+                "confirmed",
+            ):
+                active = active_for_key(projected, duplicate["key"])
+                if active:
+                    ids = ", ".join(existing["id"] for existing in active)
+                    raise ValueError(
+                        f"记忆键 {duplicate['key']} 已有有效版本 {ids}；"
+                        "请先明确更正关系"
+                    )
+                changed_at = now_iso()
+                change = {
+                    "id": duplicate["id"],
+                    "set": {"status": "active", "updated_at": changed_at},
+                }
+                planned.append({"action": "promote_turn", "changes": [change]})
+                projected[duplicate["id"]].update(change["set"])
+                counts["remembered"] += 1
+            elif mode == "confirmed" and duplicate["status"] == "pending":
+                changed_at = now_iso()
+                change = {
+                    "id": duplicate["id"],
+                    "set": {"status": "confirmed", "updated_at": changed_at},
+                }
+                planned.append({"action": "confirm_turn", "changes": [change]})
+                projected[duplicate["id"]].update(change["set"])
+                counts["confirmed"] += 1
+            else:
+                counts["duplicates"] += 1
+            continue
+
+        changes = validate_supersedes(projected, record) if mode == "remember" else []
+        planned.append(
+            {
+                "action": "remember_turn" if mode == "remember" else "capture_turn",
+                "record": record,
+                "changes": changes,
+            }
+        )
+        for change in changes:
+            projected[change["id"]].update(change["set"])
+        projected[record["id"]] = dict(record)
+        counts["remembered" if mode == "remember" else mode] += 1
+
+    for operation in planned:
+        append_event(
+            ledger,
+            action=operation["action"],
+            record=operation.get("record"),
+            changes=operation.get("changes"),
+        )
+        if operation.get("record"):
+            append_inbox(memory_root, operation["record"])
+    refresh(memory_root)
+    print(
+        "turn_closed=ok "
+        f"pending={counts['pending']} confirmed={counts['confirmed']} "
+        f"remembered={counts['remembered']} duplicates={counts['duplicates']}"
+    )
+
+
 def command_remember(args: argparse.Namespace, memory_root: Path) -> None:
     record = make_record(args, status="active")
     ledger = memory_root / "ledger.jsonl"
@@ -548,6 +680,12 @@ def parser() -> argparse.ArgumentParser:
     common(capture)
     capture.add_argument("--confirmed", action="store_true")
     capture.set_defaults(func=command_capture)
+
+    close_turn = sub.add_parser(
+        "close-turn",
+        help="validate and persist memory candidates from one completed turn",
+    )
+    close_turn.set_defaults(func=command_close_turn)
 
     remember = sub.add_parser("remember", help="write confirmed long-term memory")
     common(remember)

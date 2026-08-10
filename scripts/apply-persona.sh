@@ -94,5 +94,5 @@ path.write_text(
 )
 PY
 
-echo "Applied Jarvis persona, continuous memory, intake, writing and project skills for agent ${AGENT_ID}."
+echo "Applied Jarvis persona, presentation, continuous memory, intake, writing and project skills for agent ${AGENT_ID}."
 echo "Start a new channel session with /new so Codex inherits updated Skills."

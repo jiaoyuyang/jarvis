@@ -15,7 +15,7 @@ fi
 
 docker compose exec -T -e JARVIS_WORKSPACE="$WORKSPACE" jarvis sh -eu -c '
   workspace="$JARVIS_WORKSPACE"
-  for skill in jarvis-memory jarvis-intake jarvis-management-writing jarvis-project; do
+  for skill in jarvis-memory jarvis-intake jarvis-management-writing jarvis-project jarvis-presentation; do
     test -f "$workspace/skills/$skill/SKILL.md"
     echo "$skill=installed"
   done
@@ -45,6 +45,7 @@ required = {
     "jarvis-intake",
     "jarvis-management-writing",
     "jarvis-project",
+    "jarvis-presentation",
 }
 manifest = read_skill_manifest(workspace).get("skills", {})
 disabled = sorted(
