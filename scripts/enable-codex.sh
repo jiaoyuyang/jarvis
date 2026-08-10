@@ -54,7 +54,7 @@ settings = data.setdefault("backend_settings", {})
 # full access inside the container while retaining on-request approval handling.
 settings["sandbox"] = "danger-full-access"
 settings["approval_policy"] = "on-request"
-settings["reasoning_summary"] = "auto"
+settings["reasoning_summary"] = "auto"\nsettings["final_only"] = True
 
 model = os.environ.get("JARVIS_CODEX_MODEL", "").strip()
 reasoning = os.environ.get("JARVIS_CODEX_REASONING", "").strip()
@@ -75,5 +75,5 @@ PY
 
 docker compose restart jarvis >/dev/null
 echo "Jarvis now uses the Codex backend with ChatGPT subscription authentication."
-echo "Security boundary: hardened Docker container; Codex sandbox: danger-full-access."
+echo "Security boundary: hardened Docker container; Codex sandbox: danger-full-access."\necho "DingTalk delivery: final answer only."
 echo "Run ./scripts/codex-status.sh to verify the active backend."
