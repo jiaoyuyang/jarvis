@@ -32,6 +32,31 @@ docker compose exec -T -e JARVIS_PERSONA_TARGET="$TARGET" jarvis sh -eu -c '
   fi
 '
 
+docker compose exec -T -e JARVIS_SKILL_WORKSPACE="$TARGET" jarvis python - <<'PY'
+import os
+from pathlib import Path
+
+from qwenpaw.agents.skill_system import (
+    SkillService,
+    read_skill_manifest,
+    reconcile_workspace_manifest,
+)
+
+workspace = Path(os.environ["JARVIS_SKILL_WORKSPACE"])
+reconcile_workspace_manifest(workspace)
+result = SkillService(workspace).enable_skill("jarvis-memory")
+if not result.get("success"):
+    raise SystemExit(f"failed to enable jarvis-memory: {result}")
+
+entry = read_skill_manifest(workspace).get("skills", {}).get(
+    "jarvis-memory",
+    {},
+)
+if not entry.get("enabled", False):
+    raise SystemExit("jarvis-memory is still disabled after enable request")
+print("Enabled workspace skill: jarvis-memory")
+PY
+
 docker compose exec -T -e JARVIS_AGENT_CONFIG="$TARGET/agent.json" jarvis python - <<'PY'
 import json
 import os
@@ -50,4 +75,5 @@ path.write_text(
 )
 PY
 
-echo "Applied Jarvis persona to agent ${AGENT_ID}."
+echo "Applied Jarvis persona and enabled jarvis-memory for agent ${AGENT_ID}."
+echo "Start a new channel session with /new so Codex inherits updated Skills."
