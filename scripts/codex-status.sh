@@ -24,7 +24,7 @@ settings = data.get("backend_settings") or {}
 print(f"agent={data.get('name', '')}")
 print(f"backend={data.get('backend', 'qwenpaw')}")
 print(f"sandbox={settings.get('sandbox', '')}")
-print(f"approval_policy={settings.get('approval_policy', '')}")
+print(f"approval_policy={settings.get('approval_policy', '')}")\nprint(f"final_only={str(bool(settings.get('final_only', False))).lower()}")
 print(f"model={settings.get('model') or 'account default'}")
 print(f"reasoning_effort={settings.get('reasoning_effort') or 'account default'}")
 PY
