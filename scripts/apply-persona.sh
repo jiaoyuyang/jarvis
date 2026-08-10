@@ -21,16 +21,19 @@ docker compose exec -T -e JARVIS_PERSONA_TARGET="$TARGET" jarvis sh -eu -c '
     fi
     cp "/opt/jarvis/persona/$name" "$target/$name"
   done
-  mkdir -p "$target/knowledge" "$target/memory/inbox" "$target/skills"
-  if test -d /opt/jarvis/skills/jarvis-memory; then
-    if test -d "$target/skills/jarvis-memory"; then
+  mkdir -p "$target/knowledge/projects" "$target/knowledge/intake" \
+    "$target/memory/inbox" "$target/skills"
+  for source in /opt/jarvis/skills/jarvis-*; do
+    test -d "$source" || continue
+    skill_name=${source##*/}
+    if test -d "$target/skills/$skill_name"; then
       backup_root="$target/backups/persona/$stamp"
       mkdir -p "$backup_root"
-      cp -R "$target/skills/jarvis-memory" "$backup_root/jarvis-memory"
+      cp -R "$target/skills/$skill_name" "$backup_root/$skill_name"
     fi
-    rm -rf "$target/skills/jarvis-memory"
-    cp -R /opt/jarvis/skills/jarvis-memory "$target/skills/jarvis-memory"
-  fi
+    rm -rf "$target/skills/$skill_name"
+    cp -R "$source" "$target/skills/$skill_name"
+  done
 '
 
 docker compose exec -T -e JARVIS_SKILL_WORKSPACE="$TARGET" jarvis python - <<'PY'
@@ -45,17 +48,25 @@ from qwenpaw.agents.skill_system import (
 
 workspace = Path(os.environ["JARVIS_SKILL_WORKSPACE"])
 reconcile_workspace_manifest(workspace)
-result = SkillService(workspace).enable_skill("jarvis-memory")
-if not result.get("success"):
-    raise SystemExit(f"failed to enable jarvis-memory: {result}")
-
-entry = read_skill_manifest(workspace).get("skills", {}).get(
-    "jarvis-memory",
-    {},
+skill_names = sorted(
+    path.name
+    for path in (workspace / "skills").glob("jarvis-*")
+    if path.is_dir()
 )
-if not entry.get("enabled", False):
-    raise SystemExit("jarvis-memory is still disabled after enable request")
-print("Enabled workspace skill: jarvis-memory")
+if not skill_names:
+    raise SystemExit("no Jarvis skills were installed")
+
+service = SkillService(workspace)
+for skill_name in skill_names:
+    result = service.enable_skill(skill_name)
+    if not result.get("success"):
+        raise SystemExit(f"failed to enable {skill_name}: {result}")
+
+manifest = read_skill_manifest(workspace).get("skills", {})
+disabled = [name for name in skill_names if not manifest.get(name, {}).get("enabled", False)]
+if disabled:
+    raise SystemExit(f"Jarvis skills are still disabled: {disabled}")
+print("Enabled workspace skills: " + ", ".join(skill_names))
 PY
 
 docker compose exec -T -e JARVIS_MEMORY_WORKSPACE="$TARGET" jarvis sh -eu -c '
@@ -83,5 +94,5 @@ path.write_text(
 )
 PY
 
-echo "Applied Jarvis persona and enabled the continuous memory ledger for agent ${AGENT_ID}."
+echo "Applied Jarvis persona, continuous memory, intake, writing and project skills for agent ${AGENT_ID}."
 echo "Start a new channel session with /new so Codex inherits updated Skills."

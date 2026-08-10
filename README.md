@@ -10,6 +10,7 @@ Jarvis 是焦玉阳的 7x24 个人智能助理。本仓库不再自研通用 Age
 - 使用 ChatGPT 订阅 OAuth 的 Codex 主智能体
 - QwenPaw 会话、文件、Skills、MCP 和本地知识
 - 两级持续记忆、追加式版本账本与冲突留痕
+- 钉钉材料接收、管理写作和项目行动闭环
 - Jarvis 专属人设与安全边界
 - 运行数据、密钥和代码完全分离
 - 为后续华为小艺 A2A 入口预留能力
@@ -94,7 +95,7 @@ chmod +x scripts/*.sh
 连通性，并更新私有 `.env`。它不会修改 Mihomo 配置，也不会自动切换梯子猫
 或一元机场线路。
 
-详细步骤见 [Ubuntu 部署](docs/DEPLOY_UBUNTU.md) 和 [验收清单](docs/ACCEPTANCE.md)。旧系统知识和记忆迁移见 [迁移边界](docs/MIGRATION.md)，持续记忆的数据结构和恢复方式见 [持续记忆](docs/MEMORY.md)。
+详细步骤见 [Ubuntu 部署](docs/DEPLOY_UBUNTU.md) 和 [验收清单](docs/ACCEPTANCE.md)。旧系统知识和记忆迁移见 [迁移边界](docs/MIGRATION.md)，持续记忆见 [持续记忆](docs/MEMORY.md)，材料与项目闭环见 [工作材料闭环](docs/WORKFLOWS.md)。
 
 ## 常用命令
 
@@ -103,6 +104,7 @@ chmod +x scripts/*.sh
 ./scripts/backup.sh
 ./scripts/apply-persona.sh
 ./scripts/memory-status.sh
+./scripts/workflow-status.sh
 ./scripts/codex-status.sh
 ./scripts/check-proxy.sh
 ./scripts/migrate-legacy-knowledge.sh --dry-run
