@@ -15,8 +15,7 @@ Jarvis 是焦玉阳的 7x24 个人智能助理。本仓库不再自研通用 Age
 
 ## 设计原则
 
-1. **跟随上游**：不复制或魔改 QwenPaw 核心源码，采用其官方 Codex
-   Harness。
+1. **跟随上游**：不 Fork 或复制 QwenPaw；采用官方 Codex Harness，仅对锁定版本应用可审计、构建期校验的最小兼容补丁。
 2. **私有数据不入库**：记忆、会话、密钥和文件仅保存在服务器 `runtime/`。
 3. **容器即边界**：Jarvis 不挂载 Docker Socket，不获得宿主机目录和特权权限。
 4. **订阅优先**：Codex 使用 ChatGPT OAuth，不要求 OpenAI API Key 或
@@ -115,8 +114,7 @@ docker compose restart jarvis
 ## 版本说明
 
 QwenPaw 的直接 Codex Backend 从 2.1.0 beta 开始提供，因此本版本固定在
-`v2.1.0-beta.2` 并安装其对应的 `openai-codex==0.144.4`。升级脚本会先
-备份现有数据；完成验收前保留备份和旧服务器。
+`v2.1.0-beta.2` 并安装其对应的 `openai-codex==0.144.4`。Jarvis 派生镜像对该锁定版本应用 final-only 兼容补丁：Codex 内部仍可规划、检索和调用工具，但钉钉仅收到每轮最终答复。升级脚本会先备份现有数据；完成验收前保留备份和旧服务器。
 
 ## 上游与许可证
 
