@@ -3,6 +3,8 @@ FROM ${QWENPAW_IMAGE}
 
 ARG OPENAI_CODEX_VERSION=0.144.4
 
+COPY patches/patch_qwenpaw_codex_final_only.py /opt/jarvis/patches/patch_qwenpaw_codex_final_only.py
+
 # QwenPaw keeps third-party runtimes optional. Install the exact Codex
 # version pinned by the selected QwenPaw release, plus ripgrep for the
 # local knowledge-search skill.
@@ -16,6 +18,10 @@ RUN sed -i \
     && rm -rf /var/lib/apt/lists/* \
     && /app/venv/bin/python -m pip install --no-cache-dir \
         "openai-codex==${OPENAI_CODEX_VERSION}" \
+    && /app/venv/bin/python \
+        /opt/jarvis/patches/patch_qwenpaw_codex_final_only.py \
+    && /app/venv/bin/python -c \
+        "import py_compile; from qwenpaw.harnesses.codex import adapter; py_compile.compile(adapter.__file__, doraise=True)" \
     && /app/venv/bin/python -c \
         "from qwenpaw.harnesses.codex.discovery import resolve_codex_binary; assert resolve_codex_binary() is not None"
 
