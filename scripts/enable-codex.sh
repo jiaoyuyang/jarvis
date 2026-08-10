@@ -69,8 +69,7 @@ else:
     settings.pop("reasoning_effort", None)
 
 path.write_text(
-    json.dumps(data, ensure_ascii=False, indent=2) + "
-",
+    json.dumps(data, ensure_ascii=False, indent=2) + "\n",
     encoding="utf-8",
 )
 PY
