@@ -9,6 +9,55 @@ LEGACY_WORKSPACE="/opt/codex-workspace"
 DEST_WORKSPACE="${PROJECT_DIR}/runtime/data/workspaces/default"
 DRY_RUN=false
 
+run_as_root() {
+  if (( EUID == 0 )); then
+    "$@"
+  elif command -v sudo >/dev/null 2>&1; then
+    sudo "$@"
+  else
+    echo "sudo is required to prepare the host import-staging directory." >&2
+    return 1
+  fi
+}
+
+ensure_user_owned_dir() {
+  local path="$1"
+  local caller_uid caller_gid
+  if mkdir -p "$path" 2>/dev/null && [[ -w "$path" ]]; then
+    return 0
+  fi
+  caller_uid="$(id -u)"
+  caller_gid="$(id -g)"
+  run_as_root install -d -m 0700 -o "$caller_uid" -g "$caller_gid" "$path"
+}
+
+summarize_tree() {
+  local label="$1"
+  local source="$2"
+  local stats
+  if [[ ! -d "$source" ]]; then
+    echo "$label: missing"
+    return 0
+  fi
+  stats="$(
+    find "$source" \
+      \( -type d \( \
+        -name .git -o -name .venv -o -name venv -o \
+        -name __pycache__ -o -name .cache -o -name .codex -o \
+        -name .codex-runtime -o -name backups -o -name logs \
+      \) -prune \) -o \
+      \( -type f \
+        ! -name '.env' ! -name '.env.*' \
+        ! -name '*.pem' ! -name '*.key' \
+        ! -name 'id_rsa*' ! -name 'id_ed25519*' \
+        ! -name download_tokens.json ! -name credentials.json \
+        ! -name secrets.json -printf '%s\n' \
+      \) \
+      | awk '{ files += 1; bytes += $1 } END { printf "%d files, %d bytes", files, bytes }'
+  )"
+  echo "$label: $stats"
+}
+
 usage() {
   cat <<'EOF'
 Usage: migrate-legacy-knowledge.sh [options]
@@ -78,6 +127,18 @@ echo "Legacy application: $LEGACY_APP"
 echo "Legacy workspace:   $LEGACY_WORKSPACE"
 echo "Jarvis workspace:   $DEST_WORKSPACE"
 if [[ "$DRY_RUN" == true ]]; then
+  echo
+  echo "Filtered migration inventory:"
+  summarize_tree "  application memory" "$LEGACY_APP/memory"
+  summarize_tree "  application data" "$LEGACY_APP/data"
+  summarize_tree "  curated profile" "$LEGACY_APP/memory/user"
+  summarize_tree "  curated enterprise" "$LEGACY_APP/memory/pingan"
+  summarize_tree "  curated projects" "$LEGACY_APP/memory/projects"
+  summarize_tree "  curated standards" "$LEGACY_APP/memory/standards"
+  summarize_tree "  curated decisions" "$LEGACY_APP/memory/history"
+  summarize_tree "  legacy workspace" "$LEGACY_WORKSPACE"
+  echo
+  echo "Dry run only. No source or destination was modified."
   exit 0
 fi
 
@@ -87,6 +148,7 @@ USE_CONTAINER_COPY=false
 if [[ "$DEST_WORKSPACE" == "$DEFAULT_DEST" ]] \
   && [[ "$(docker inspect --format '{{.State.Running}}' jarvis 2>/dev/null || true)" == "true" ]]; then
   USE_CONTAINER_COPY=true
+  ensure_user_owned_dir "${PROJECT_DIR}/runtime/import-staging"
   STAGING_ROOT="${PROJECT_DIR}/runtime/import-staging/$STAMP"
   ARCHIVE_ROOT="$STAGING_ROOT/archive"
   IMPORT_ROOT="$STAGING_ROOT/imports"
