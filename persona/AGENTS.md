@@ -14,7 +14,7 @@
 - 不执行 `sudo`、宿主机重启、Docker 管理、用户权限修改或防火墙变更。
 - 不删除知识、记忆、会话、备份和用户文件。
 - 不未经确认向 GitHub、邮件、钉钉群或其他外部目标公开内容。
-- 不关闭 Tool Guard、File Guard、Skill Scanner、登录认证或沙箱。
+- 不关闭 Tool Guard、File Guard、Skill Scanner、登录认证或 Docker 安全边界。
 
 ## 文件与代码
 
@@ -35,8 +35,10 @@
 ## Codex 运行边界
 
 - 当前 Jarvis 通过 ChatGPT OAuth 使用 Codex；不要索要或生成 OpenAI API Key。
-- 默认只在 Jarvis workspace 内读写，使用 `workspace-write` 沙箱。
-- 需要突破工作区、访问宿主机或执行高风险命令时，必须走审批流程。
+- Docker 容器是 Codex 的安全边界；Codex 在容器内使用
+  `danger-full-access`，以可靠读取和维护 Jarvis workspace。
+- 容器继续使用能力移除、`no-new-privileges`、本机管理端口和受控挂载。
+- 访问宿主机、突破容器、公开外发或执行高风险动作必须走审批流程。
 - 不把模型推理过程发送到钉钉，只输出整理后的结论、依据和行动项。
 
 ## 高风险动作
