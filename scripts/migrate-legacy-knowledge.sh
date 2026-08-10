@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
@@ -7,7 +7,9 @@ PROJECT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 LEGACY_APP="/opt/codex-dingtalk"
 LEGACY_WORKSPACE="/opt/codex-workspace"
 DEST_WORKSPACE="${PROJECT_DIR}/runtime/data/workspaces/default"
-DRY_RUN=false
+DRY_RUN=0
+
+trap 'rc=$?; echo "Migration failed at line $LINENO (exit $rc)." >&2; exit "$rc"' ERR
 
 run_as_root() {
   if (( EUID == 0 )); then
@@ -90,7 +92,7 @@ while (($#)); do
       shift 2
       ;;
     --dry-run)
-      DRY_RUN=true
+      DRY_RUN=1
       shift
       ;;
     -h|--help)
@@ -126,7 +128,7 @@ esac
 echo "Legacy application: $LEGACY_APP"
 echo "Legacy workspace:   $LEGACY_WORKSPACE"
 echo "Jarvis workspace:   $DEST_WORKSPACE"
-if [[ "$DRY_RUN" == true ]]; then
+if (( DRY_RUN == 1 )); then
   echo
   echo "Filtered migration inventory:"
   summarize_tree "  application memory" "$LEGACY_APP/memory"
@@ -141,6 +143,8 @@ if [[ "$DRY_RUN" == true ]]; then
   echo "Dry run only. No source or destination was modified."
   exit 0
 fi
+
+echo "Migration mode: copy and verify"
 
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 DEFAULT_DEST="$(realpath -m "${PROJECT_DIR}/runtime/data/workspaces/default")"
@@ -158,6 +162,7 @@ else
   IMPORT_ROOT="$KNOWLEDGE_ROOT/imports/$STAMP"
 fi
 
+echo "Preparing migration staging: $ARCHIVE_ROOT"
 mkdir -p "$ARCHIVE_ROOT" "$IMPORT_ROOT"
 if [[ "$USE_CONTAINER_COPY" == false ]]; then
   mkdir -p "$DEST_WORKSPACE/memory/inbox"
@@ -199,6 +204,7 @@ copy_dir_if_present() {
 }
 
 if [[ -d "$LEGACY_APP" ]]; then
+  echo "Copying filtered legacy application knowledge..."
   APP_ARCHIVE="$ARCHIVE_ROOT/codex-dingtalk"
   mkdir -p "$APP_ARCHIVE"
   copy_tree_filtered "$LEGACY_APP/memory" "$APP_ARCHIVE/memory"
@@ -212,9 +218,11 @@ if [[ -d "$LEGACY_APP" ]]; then
 fi
 
 if [[ -d "$LEGACY_WORKSPACE" ]]; then
+  echo "Copying filtered legacy workspace..."
   copy_tree_filtered "$LEGACY_WORKSPACE" "$ARCHIVE_ROOT/codex-workspace"
 fi
 
+echo "Building manifest and checksums..."
 MANIFEST="$ARCHIVE_ROOT/IMPORT_MANIFEST.md"
 CHECKSUMS="$ARCHIVE_ROOT/SHA256SUMS"
 FILE_COUNT="$(find "$ARCHIVE_ROOT" -type f | wc -l | tr -d ' ')"
@@ -243,6 +251,7 @@ BYTE_COUNT="$(du -sb "$ARCHIVE_ROOT" | awk '{print $1}')"
 ) > "$CHECKSUMS"
 
 if [[ "$USE_CONTAINER_COPY" == true ]]; then
+  echo "Installing the verified import into the running Jarvis workspace..."
   docker compose exec -T -e JARVIS_IMPORT_STAMP="$STAMP" jarvis sh -eu -c '
     stamp="$JARVIS_IMPORT_STAMP"
     source="/app/import-staging/$stamp"
