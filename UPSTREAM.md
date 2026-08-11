@@ -21,6 +21,15 @@ the image build compiles the patched module; an incompatible upstream change
 must fail the build. Remove the patch when QwenPaw provides an equivalent
 official final-only channel option.
 
+Jarvis also applies
+`patches/patch_qwenpaw_dingtalk_turn_recovery.py` to the pinned DingTalk
+channel. QwenPaw's upstream AI Card recovery does not persist the incoming
+message `Thinking` reaction and does not cover markdown-mode turns. The Jarvis
+patch records only minimal delivery metadata, recalls stale processing state
+after restart and sends a concise interruption notice without storing the
+user's prompt or model output. Its anchors are strict and the patched channel
+is compiled during the image build.
+
 After the first successful Ubuntu deployment, record the resolved Docker image
 digest here before production cutover.
 

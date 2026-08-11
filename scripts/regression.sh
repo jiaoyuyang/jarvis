@@ -48,6 +48,7 @@ grep -q '^backend=codex$' "$TEMP_REPORT"
 grep -q '^sandbox=danger-full-access$' "$TEMP_REPORT"
 grep -q '^final_only=true$' "$TEMP_REPORT"
 grep -q '^final_only_patch=installed$' "$TEMP_REPORT"
+grep -q '^turn_recovery_patch=installed$' "$TEMP_REPORT"
 grep -q '^health=healthy$' "$TEMP_REPORT"
 
 install -m 600 "$TEMP_REPORT" "$REPORT"
