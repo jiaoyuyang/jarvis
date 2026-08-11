@@ -37,6 +37,15 @@ class OutputPolicyTest(unittest.TestCase):
         self.assertIn("最终答复文本本身不作为", persona)
         self.assertIn("没有候选时不调用工具、不创建", memory)
 
+    def test_project_routing_requires_confirmation_on_conflict(self) -> None:
+        project = (ROOT / "skills/jarvis-project/SKILL.md").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("`jarvis` 只用于 Jarvis 智能体自身", project)
+        self.assertIn("不要静默登记", project)
+        self.assertIn("使用迁移，不删除或直接改写账本", project)
+
 
 if __name__ == "__main__":
     unittest.main()

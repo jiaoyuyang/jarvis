@@ -43,6 +43,15 @@ python "$PROJECT_TOOL" --workspace . init \
 
 ## 登记规则
 
+登记前必须先确认目标项目。`jarvis` 只用于 Jarvis 智能体自身的架构、部署、能力、
+缺陷和版本事项，不能作为不明确材料的默认项目；万佛、用增、用户增长、公域经营
+材料应进入 `wanfuo`。未知项目使用 `inbox` 或向用户确认。
+
+即使用户明确给出项目名称，如果材料标题、正文和既有项目状态持续指向另一个已知
+项目，也不要静默登记。先用一句话指出“材料内容与目标项目可能不一致”，只确认
+一次目标项目；确认后再写入。测试和验收材料必须与目标项目主题一致，不能用业务
+材料测试 Jarvis 项目台账。
+
 会议或用户明确陈述形成事实后，按最小独立条目登记：
 
 ```bash
@@ -82,6 +91,19 @@ python "$PROJECT_TOOL" --workspace . change ITEM_ID \
 
 允许状态：`open`、`planned`、`active`、`blocked`、`done`、`cancelled`、`noted`。
 变更使用追加式事件，不覆盖历史。
+
+项目登记错误时使用迁移，不删除或直接改写账本：
+
+```bash
+python "$PROJECT_TOOL" --workspace . move ITEM_ID \
+  --project jarvis \
+  --to-project wanfuo \
+  --to-name '万佛用户增长平台' \
+  --reason '用户确认目标项目选择错误'
+```
+
+迁移会在目标项目创建关联条目，并在源项目保留 `moved` 历史。重复执行保持幂等；
+迁出条目不再出现在源项目当前决策、行动和风险视图中。
 
 ## 与材料和记忆的边界
 

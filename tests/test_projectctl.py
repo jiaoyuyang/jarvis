@@ -108,6 +108,69 @@ class ProjectCtlTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("YYYY-MM-DD", result.stderr)
 
+    def test_move_preserves_history_and_removes_item_from_current_view(self) -> None:
+        item_id = self.record_action()
+        result = self.run_cli(
+            "move",
+            item_id,
+            "--project",
+            "jarvis",
+            "--to-project",
+            "wanfuo",
+            "--to-name",
+            "万佛用户增长平台",
+            "--reason",
+            "验收材料目标项目选择错误",
+        )
+        self.assertIn(f"moved={item_id}", result.stdout)
+
+        source_actions = (
+            self.workspace / "knowledge/projects/jarvis/ACTIONS.md"
+        ).read_text()
+        source_timeline = (
+            self.workspace / "knowledge/projects/jarvis/TIMELINE.md"
+        ).read_text()
+        target_actions = (
+            self.workspace / "knowledge/projects/wanfuo/ACTIONS.md"
+        ).read_text()
+        self.assertNotIn("Deploy workflow skills", source_actions)
+        self.assertIn("｜migration｜moved｜", source_timeline)
+        self.assertIn("已迁移至 wanfuo", source_timeline)
+        self.assertIn("Deploy workflow skills", target_actions)
+
+        duplicate = self.run_cli(
+            "move",
+            item_id,
+            "--project",
+            "jarvis",
+            "--to-project",
+            "wanfuo",
+            "--to-name",
+            "万佛用户增长平台",
+            "--reason",
+            "重复执行",
+        )
+        self.assertIn(f"already_moved={item_id}", duplicate.stdout)
+        self.assertEqual(
+            len(
+                (
+                    self.workspace / "knowledge/projects/wanfuo/ledger.jsonl"
+                ).read_text().splitlines()
+            ),
+            1,
+        )
+
+        rejected = self.run_cli(
+            "change",
+            item_id,
+            "--status",
+            "done",
+            "--note",
+            "不应修改原项目迁出条目",
+            ok=False,
+        )
+        self.assertIn("已迁移条目", rejected.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

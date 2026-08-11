@@ -106,6 +106,7 @@ chmod +x scripts/*.sh
 ./scripts/apply-persona.sh
 ./scripts/memory-status.sh
 ./scripts/workflow-status.sh
+./scripts/regression.sh
 ./scripts/codex-status.sh
 ./scripts/check-proxy.sh
 ./scripts/migrate-legacy-knowledge.sh --dry-run

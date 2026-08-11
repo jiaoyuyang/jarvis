@@ -22,7 +22,16 @@ from typing import Any, Iterator
 
 SCHEMA_VERSION = 1
 KINDS = ("decision", "action", "milestone", "risk", "update")
-STATUSES = ("open", "planned", "active", "blocked", "done", "cancelled", "noted")
+STATUSES = (
+    "open",
+    "planned",
+    "active",
+    "blocked",
+    "done",
+    "cancelled",
+    "noted",
+    "moved",
+)
 DEFAULT_STATUS = {
     "decision": "noted",
     "action": "open",
@@ -259,6 +268,8 @@ def change_item(args: argparse.Namespace, workspace: Path) -> None:
     if len(matches) != 1:
         raise ValueError("找不到唯一的项目条目")
     root, meta, items = matches[0]
+    if items[args.id]["status"] == "moved":
+        raise ValueError("已迁移条目不能在原项目继续变更")
     note = normalize(args.note, "note", 500)
     changed = now_iso()
     event = {
@@ -275,6 +286,108 @@ def change_item(args: argparse.Namespace, workspace: Path) -> None:
     print(f"changed={args.id} status={args.status}")
 
 
+def move_item(args: argparse.Namespace, workspace: Path) -> None:
+    source_key = project_key(args.project)
+    target_key = project_key(args.to_project)
+    if source_key == target_key:
+        raise ValueError("源项目和目标项目不能相同")
+    target_name = normalize(args.to_name, "to-name", 100)
+    reason = normalize(args.reason, "reason", 500)
+
+    source_root = project_dir(workspace, source_key)
+    source_meta = load_meta(source_root)
+    source_events = load_events(source_root / "ledger.jsonl")
+    source_items = build_state(source_events)
+    source_item = source_items.get(args.id)
+    if not source_item:
+        raise ValueError(f"源项目中不存在条目: {args.id}")
+    if source_item["status"] == "moved":
+        if source_item.get("moved_to_project") == target_key:
+            print(
+                f"already_moved={args.id} to={target_key} "
+                f"replacement={source_item.get('moved_to_item', '')}"
+            )
+            return
+        raise ValueError("条目已经迁移到其他项目")
+
+    target_root = project_dir(workspace, target_key)
+    target_meta_path = target_root / "meta.json"
+    if target_meta_path.exists():
+        target_meta = load_meta(target_root)
+        if target_meta["name"] != target_name:
+            raise ValueError(f"目标项目已存在且名称为: {target_meta['name']}")
+    else:
+        target_root.mkdir(parents=True, exist_ok=False)
+        target_meta = {
+            "schema_version": SCHEMA_VERSION,
+            "project": target_key,
+            "name": target_name,
+            "created_at": now_iso(),
+        }
+        atomic_write(
+            target_meta_path,
+            json.dumps(target_meta, ensure_ascii=False, indent=2) + "\n",
+        )
+
+    target_ledger = target_root / "ledger.jsonl"
+    target_items = build_state(load_events(target_ledger))
+    replacement = next(
+        (
+            item
+            for item in target_items.values()
+            if item.get("moved_from_project") == source_key
+            and item.get("moved_from_item") == args.id
+        ),
+        None,
+    )
+    changed = now_iso()
+    if replacement is None:
+        replacement = dict(source_item)
+        replacement.update(
+            {
+                "id": item_id(source_item["kind"], source_item["content"]),
+                "updated_at": changed,
+                "moved_from_project": source_key,
+                "moved_from_item": args.id,
+                "move_reason": reason,
+            }
+        )
+        append_event(
+            target_ledger,
+            {
+                "schema_version": SCHEMA_VERSION,
+                "event_id": event_id(),
+                "at": changed,
+                "action": "record",
+                "item": replacement,
+            },
+        )
+        target_items[replacement["id"]] = replacement
+
+    source_change = {
+        "status": "moved",
+        "updated_at": changed,
+        "moved_to_project": target_key,
+        "moved_to_item": replacement["id"],
+        "move_reason": reason,
+    }
+    append_event(
+        source_root / "ledger.jsonl",
+        {
+            "schema_version": SCHEMA_VERSION,
+            "event_id": event_id(),
+            "at": changed,
+            "action": "change",
+            "target": args.id,
+            "set": source_change,
+        },
+    )
+    source_items[args.id].update(source_change)
+    render(target_root, target_meta, target_items)
+    render(source_root, source_meta, source_items)
+    print(f"moved={args.id} to={target_key} replacement={replacement['id']}")
+
+
 def format_item(item: dict[str, Any], *, include_status: bool = True) -> str:
     lines = [f"### {item['title']}", ""]
     if include_status:
@@ -289,10 +402,11 @@ def format_item(item: dict[str, Any], *, include_status: bool = True) -> str:
 
 def render(root: Path, meta: dict[str, Any], items: dict[str, dict[str, Any]]) -> None:
     ordered = sorted(items.values(), key=lambda item: (item["updated_at"], item["id"]), reverse=True)
-    active_actions = [i for i in ordered if i["kind"] == "action" and i["status"] not in ("done", "cancelled")]
-    active_risks = [i for i in ordered if i["kind"] == "risk" and i["status"] not in ("done", "cancelled")]
-    milestones = [i for i in ordered if i["kind"] == "milestone"]
-    updates = [i for i in ordered if i["kind"] == "update"]
+    current = [item for item in ordered if item["status"] != "moved"]
+    active_actions = [i for i in current if i["kind"] == "action" and i["status"] not in ("done", "cancelled")]
+    active_risks = [i for i in current if i["kind"] == "risk" and i["status"] not in ("done", "cancelled")]
+    milestones = [i for i in current if i["kind"] == "milestone"]
+    updates = [i for i in current if i["kind"] == "update"]
 
     status_lines = [
         f"# {meta['name']}：当前状态",
@@ -321,7 +435,7 @@ def render(root: Path, meta: dict[str, Any], items: dict[str, dict[str, Any]]) -
     atomic_write(root / "STATUS.md", "\n".join(status_lines))
 
     decision_lines = [f"# {meta['name']}：已确认决策", ""]
-    decisions = [i for i in ordered if i["kind"] == "decision"]
+    decisions = [i for i in current if i["kind"] == "decision"]
     if decisions:
         decision_lines.extend(format_item(i, include_status=False) for i in decisions)
     else:
@@ -333,7 +447,7 @@ def render(root: Path, meta: dict[str, Any], items: dict[str, dict[str, Any]]) -
         action_lines.extend(format_item(i) for i in active_actions)
     else:
         action_lines.extend(["暂无记录。", ""])
-    closed = [i for i in ordered if i["kind"] == "action" and i["status"] in ("done", "cancelled")]
+    closed = [i for i in current if i["kind"] == "action" and i["status"] in ("done", "cancelled")]
     action_lines.extend(["## 已关闭", ""])
     if closed:
         action_lines.extend(format_item(i) for i in closed[:20])
@@ -344,9 +458,17 @@ def render(root: Path, meta: dict[str, Any], items: dict[str, dict[str, Any]]) -
     timeline = [f"# {meta['name']}：时间线", ""]
     if ordered:
         for item in ordered:
-            timeline.append(
-                f"- {item['updated_at']}｜{item['kind']}｜{item['status']}｜{item['title']}：{item['content']}"
-            )
+            if item["status"] == "moved":
+                timeline.append(
+                    f"- {item['updated_at']}｜migration｜moved｜{item['title']}："
+                    f"已迁移至 {item.get('moved_to_project', '其他项目')}；"
+                    f"{item.get('move_reason', '项目归属纠正')}"
+                )
+            else:
+                timeline.append(
+                    f"- {item['updated_at']}｜{item['kind']}｜{item['status']}｜"
+                    f"{item['title']}：{item['content']}"
+                )
     else:
         timeline.append("暂无记录。")
     timeline.append("")
@@ -372,12 +494,15 @@ def project_status(args: argparse.Namespace, workspace: Path) -> None:
     root = project_dir(workspace, key)
     load_meta(root)
     items = build_state(load_events(root / "ledger.jsonl"))
-    counts = Counter(item["kind"] for item in items.values())
     statuses = Counter(item["status"] for item in items.values())
+    current = [item for item in items.values() if item["status"] != "moved"]
+    current_counts = Counter(item["kind"] for item in current)
     print(f"project={key}")
     print(f"items={len(items)}")
+    print(f"current_items={len(current)}")
+    print(f"moved={statuses['moved']}")
     for kind in KINDS:
-        print(f"{kind}={counts[kind]}")
+        print(f"{kind}={current_counts[kind]}")
     print(f"open_or_active={sum(statuses[s] for s in ('open', 'planned', 'active', 'blocked'))}")
 
 
@@ -401,6 +526,12 @@ def parser() -> argparse.ArgumentParser:
     change.add_argument("id")
     change.add_argument("--status", choices=STATUSES, required=True)
     change.add_argument("--note", required=True)
+    move = sub.add_parser("move")
+    move.add_argument("id")
+    move.add_argument("--project", required=True)
+    move.add_argument("--to-project", required=True)
+    move.add_argument("--to-name", required=True)
+    move.add_argument("--reason", required=True)
     verify = sub.add_parser("verify")
     verify.add_argument("--project", required=True)
     verify.add_argument("--rebuild", action="store_true")
@@ -424,6 +555,8 @@ def main() -> int:
                 record_item(args, workspace)
             elif args.command == "change":
                 change_item(args, workspace)
+            elif args.command == "move":
+                move_item(args, workspace)
             elif args.command == "verify":
                 verify_project(args, workspace)
             elif args.command == "status":

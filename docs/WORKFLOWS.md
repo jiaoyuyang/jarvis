@@ -69,10 +69,11 @@ docker compose restart jarvis
 
 ## 验收场景
 
-向钉钉上传一份无敏感信息的测试文本或会议转写，并发送：
+向钉钉上传一份无敏感信息、且内容明确属于目标项目的测试文本。例如使用 Jarvis
+升级记录测试 `jarvis`，然后发送：
 
 ```text
-请整理成简洁会议纪要，并纳入 Jarvis 项目。没有明确责任人和时间的不要猜。
+请整理成简洁验收纪要，并纳入 Jarvis 项目。没有明确责任人和时间的不要猜。
 ```
 
 验收要求：
@@ -82,6 +83,20 @@ docker compose restart jarvis
 3. 决策、行动项和建议区分清楚；
 4. 再开新会话后能回答该项目最近结论和待办；
 5. `./scripts/workflow-status.sh` 校验通过。
+
+验收材料必须与目标项目一致。例如，测试 `jarvis` 项目应使用 Jarvis 升级记录，
+不能把万佛或用增会议材料指定写入 `jarvis`。材料内容与目标项目明显冲突时，
+Jarvis 应先做一次简短确认。
+
+技术回归执行：
+
+```bash
+./scripts/regression.sh
+```
+
+报告会保存在服务器 `runtime/acceptance/`，并明确区分
+`technical_regression=PASS` 与 `dingtalk_acceptance=PENDING`。钉钉人工验收通过后，
+再在对话中确认并关闭项目行动项，不能用技术检查替代渠道端验收。
 
 再发送：
 
