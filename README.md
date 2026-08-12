@@ -111,6 +111,9 @@ chmod +x scripts/*.sh
 
 详细步骤见 [Ubuntu 部署](docs/DEPLOY_UBUNTU.md) 和 [验收清单](docs/ACCEPTANCE.md)。旧系统知识和记忆迁移见 [迁移边界](docs/MIGRATION.md)，持续记忆见 [持续记忆](docs/MEMORY.md)，材料、项目、表达与自动沉淀见 [工作闭环](docs/WORKFLOWS.md)。
 
+钉钉 AI Card 的“结论—摘要—行动”表达规则、模板视觉建议和人工验收方法见
+[钉钉表达层 V2](docs/DINGTALK_PRESENTATION.md)。
+
 ## 常用命令
 
 ```bash

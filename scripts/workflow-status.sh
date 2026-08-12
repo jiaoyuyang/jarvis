@@ -19,6 +19,9 @@ docker compose exec -T -e JARVIS_WORKSPACE="$WORKSPACE" jarvis sh -eu -c '
     test -f "$workspace/skills/$skill/SKILL.md"
     echo "$skill=installed"
   done
+  grep -q "^版本：2.0$" "$workspace/skills/jarvis-presentation/SKILL.md"
+  grep -q "^## 卡片化内容规则$" "$workspace/skills/jarvis-presentation/SKILL.md"
+  echo "presentation_version=2"
   python "$workspace/skills/jarvis-memory/scripts/memoryctl.py" \
     --workspace "$workspace" verify --rebuild
   python "$workspace/skills/jarvis-intake/scripts/intakectl.py" \

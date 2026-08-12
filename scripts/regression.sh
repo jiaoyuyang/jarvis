@@ -43,6 +43,7 @@ fi
 
 grep -q '^jarvis-memory=installed$' "$TEMP_REPORT"
 grep -q '^jarvis-presentation=installed$' "$TEMP_REPORT"
+grep -q '^presentation_version=2$' "$TEMP_REPORT"
 grep -q '^workspace_workflows=verified$' "$TEMP_REPORT"
 grep -q '^backend=codex$' "$TEMP_REPORT"
 grep -q '^sandbox=danger-full-access$' "$TEMP_REPORT"
