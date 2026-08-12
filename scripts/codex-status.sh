@@ -24,6 +24,7 @@ if not path.is_file():
     raise SystemExit(f"Agent config not found: {path}")
 data = json.loads(path.read_text(encoding="utf-8"))
 settings = data.get("backend_settings") or {}
+dingtalk = ((data.get("channels") or {}).get("dingtalk") or {})
 print(f"agent={data.get('name', '')}")
 print(f"backend={data.get('backend', 'qwenpaw')}")
 print(f"sandbox={settings.get('sandbox', '')}")
@@ -42,6 +43,27 @@ print(
 )
 if not recovery_installed:
     raise SystemExit("DingTalk turn recovery patch is missing")
+message_type = dingtalk.get("message_type") or "markdown"
+template_configured = bool(dingtalk.get("card_template_id"))
+robot_configured = bool(
+    dingtalk.get("robot_code") or dingtalk.get("client_id")
+)
+print(f"dingtalk_message_type={message_type}")
+print(
+    "dingtalk_card_template="
+    + ("configured" if template_configured else "missing")
+)
+print(f"dingtalk_card_key={dingtalk.get('card_template_key') or 'content'}")
+print(
+    "dingtalk_robot_code="
+    + ("configured" if robot_configured else "missing")
+)
+print(
+    "dingtalk_card_streaming="
+    + str(bool(dingtalk.get("streaming_enabled", False))).lower()
+)
+if message_type == "card" and not (template_configured and robot_configured):
+    raise SystemExit("DingTalk card mode is incomplete")
 print(f"model={settings.get('model') or 'account default'}")
 print(f"reasoning_effort={settings.get('reasoning_effort') or 'account default'}")
 PY

@@ -77,6 +77,19 @@ ssh -L 8088:127.0.0.1:8088 ubuntu@YOUR_SERVER_IP
 4. 执行 `./scripts/codex-status.sh`，确认 `backend=codex`。
 5. 在控制台和钉钉分别完成验收。
 
+如需将钉钉普通消息升级为原生 AI Card，先在钉钉开放平台创建仅包含
+`content` Markdown 变量的卡片模板，然后执行：
+
+```bash
+./scripts/enable-dingtalk-card.sh YOUR_CARD_TEMPLATE_ID.schema
+./scripts/codex-status.sh
+```
+
+卡片模式只发送 Codex 最终答复，不启用增量流式正文。模板发送失败时 QwenPaw
+会回退普通消息；需要手工切回普通消息时执行
+`./scripts/disable-dingtalk-card.sh`。模板 ID 仅写入服务器私有 `agent.json`，
+不会进入 Git 仓库。
+
 不需要配置模型供应商或 OpenAI API Key。模型与推理强度默认跟随 ChatGPT
 账户可用项，也可以在 QwenPaw 对话工具栏中选择。
 
@@ -108,6 +121,8 @@ chmod +x scripts/*.sh
 ./scripts/workflow-status.sh
 ./scripts/regression.sh
 ./scripts/codex-status.sh
+./scripts/enable-dingtalk-card.sh YOUR_CARD_TEMPLATE_ID.schema
+./scripts/disable-dingtalk-card.sh
 ./scripts/check-proxy.sh
 ./scripts/migrate-legacy-knowledge.sh --dry-run
 docker compose logs -f --tail=200 jarvis
