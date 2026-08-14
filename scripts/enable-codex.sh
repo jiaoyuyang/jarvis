@@ -56,6 +56,7 @@ settings["sandbox"] = "danger-full-access"
 settings["approval_policy"] = "on-request"
 settings["reasoning_summary"] = "auto"
 settings["final_only"] = True
+settings["turn_timeout_seconds"] = 600
 
 model = os.environ.get("JARVIS_CODEX_MODEL", "").strip()
 reasoning = os.environ.get("JARVIS_CODEX_REASONING", "").strip()

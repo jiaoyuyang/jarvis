@@ -76,7 +76,12 @@
 - [ ] 高风险命令会进入审批，不会静默越权执行
 - [ ] 钉钉只显示最终回答，不显示 reasoning 和冗长工具轨迹
 - [ ] `./scripts/codex-status.sh` 显示 `turn_recovery_patch=installed`
+- [ ] `./scripts/codex-status.sh` 显示 `turn_timeout_patch=installed`
+- [ ] `./scripts/codex-status.sh` 显示 `native_stop_patch=installed`
+- [ ] `./scripts/codex-status.sh` 显示 `turn_timeout_seconds=600`
 - [ ] 长任务执行期间重启容器后，旧 `Thinking` 状态被撤回并收到明确中断通知
+- [ ] 长任务期间发送 `/stop`，当前任务被取消且不出现 `Unsupported Codex command`
+- [ ] 模拟超时后任务自动结束，后续 `/new` 与普通消息可继续处理
 - [ ] 重启恢复通知不包含原始问题、模型输出或内部存储路径
 - [ ] 旧系统 Current Turn Guard、中断恢复和重启通知只有完成当前运行链路的等价回归后，才能标记为已具备
 - [ ] 达到订阅限额时能明确报告，不自动降级到未知付费 API

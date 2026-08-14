@@ -17,6 +17,7 @@ import json
 from pathlib import Path
 
 from qwenpaw.app.channels.dingtalk import channel as dingtalk_channel
+from qwenpaw.app.channels import base as channel_base
 from qwenpaw.harnesses.codex import adapter as codex_adapter
 
 path = Path("/app/working/workspaces/default/agent.json")
@@ -35,6 +36,25 @@ patch_installed = "JARVIS_CODEX_FINAL_ONLY_PATCH_V1" in adapter_source
 print(f"final_only_patch={'installed' if patch_installed else 'missing'}")
 if settings.get("final_only") and not patch_installed:
     raise SystemExit("final_only is enabled but the Codex adapter patch is missing")
+timeout_installed = "JARVIS_CODEX_TURN_TIMEOUT_PATCH_V1" in adapter_source
+print(
+    "turn_timeout_patch="
+    + ("installed" if timeout_installed else "missing")
+)
+if not timeout_installed:
+    raise SystemExit("Codex turn timeout patch is missing")
+print(
+    "turn_timeout_seconds="
+    + str(settings.get("turn_timeout_seconds") or 600)
+)
+base_source = Path(channel_base.__file__).read_text(encoding="utf-8")
+stop_installed = "JARVIS_STOP_COMMAND_PATCH_V1" in base_source
+print(
+    "native_stop_patch="
+    + ("installed" if stop_installed else "missing")
+)
+if not stop_installed:
+    raise SystemExit("native /stop patch is missing")
 dingtalk_source = Path(dingtalk_channel.__file__).read_text(encoding="utf-8")
 recovery_installed = "JARVIS_DINGTALK_TURN_RECOVERY_PATCH_V1" in dingtalk_source
 print(

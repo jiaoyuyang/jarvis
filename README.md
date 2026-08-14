@@ -124,6 +124,8 @@ chmod +x scripts/*.sh
 ./scripts/workflow-status.sh
 ./scripts/regression.sh
 ./scripts/codex-status.sh
+./scripts/recover-codex-session.sh SESSION_ID
+./scripts/upgrade-reliability-v1.sh
 ./scripts/enable-dingtalk-card.sh YOUR_CARD_TEMPLATE_ID.schema
 ./scripts/disable-dingtalk-card.sh
 ./scripts/check-proxy.sh
@@ -139,6 +141,11 @@ docker compose restart jarvis
 
 QwenPaw 的直接 Codex Backend 从 2.1.0 beta 开始提供，因此本版本固定在
 `v2.1.0-beta.2` 并安装其对应的 `openai-codex==0.144.4`。Jarvis 派生镜像对该锁定版本应用 final-only 兼容补丁：Codex 内部仍可规划、检索和调用工具，但钉钉仅收到每轮最终答复。升级脚本会先备份现有数据；完成验收前保留备份和旧服务器。
+
+Jarvis 另对该锁定版本增加可靠性保护：Codex 单轮默认最长 600 秒，超时后
+主动中断并释放会话任务；钉钉 `/stop` 直接调用 QwenPaw 原生控制处理器，不再
+转发为 Codex 命令。单个持久化 Codex 线程异常时，可通过
+`recover-codex-session.sh` 仅移除对应线程映射，长期记忆和知识库不受影响。
 
 ## 上游与许可证
 
