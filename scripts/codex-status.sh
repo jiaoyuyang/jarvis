@@ -36,13 +36,14 @@ patch_installed = "JARVIS_CODEX_FINAL_ONLY_PATCH_V1" in adapter_source
 print(f"final_only_patch={'installed' if patch_installed else 'missing'}")
 if settings.get("final_only") and not patch_installed:
     raise SystemExit("final_only is enabled but the Codex adapter patch is missing")
-timeout_installed = "JARVIS_CODEX_TURN_TIMEOUT_PATCH_V1" in adapter_source
+timeout_installed = "JARVIS_CODEX_TURN_TIMEOUT_PATCH_V2" in adapter_source
 print(
     "turn_timeout_patch="
     + ("installed" if timeout_installed else "missing")
 )
 if not timeout_installed:
     raise SystemExit("Codex turn timeout patch is missing")
+print("interrupted_thread_reset=true")
 print(
     "turn_timeout_seconds="
     + str(settings.get("turn_timeout_seconds") or 600)

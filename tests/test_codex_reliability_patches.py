@@ -36,8 +36,44 @@ class CodexTurnTimeoutPatchTest(unittest.TestCase):
         self.assertIn(module.MARKER, first)
         self.assertIn("turn_deadline", first)
         self.assertIn("asyncio.wait_for", first)
-        self.assertIn("await self._interrupt_turn", first)
+        self.assertIn("self._interrupt_turn(client, thread_id, turn_id)", first)
+        self.assertIn('client.request("turn/start", params)', first)
+        self.assertEqual(
+            first.count("await self.reset_session(session_id)"),
+            3,
+        )
+        self.assertIn("thread was reset", first)
         self.assertIn("600", first)
+
+    def test_v1_image_is_upgraded_in_place(self) -> None:
+        module = load_module(
+            "codex_turn_timeout_patch_migration",
+            ROOT / "patches" / "patch_qwenpaw_codex_turn_timeout.py",
+        )
+        legacy_source = "\n".join(
+            (
+                module.START_ANCHOR,
+                module.LEGACY_STATE_ANCHOR,
+                module.TURN_START_ANCHOR,
+                module.WAIT_REPLACEMENT,
+                module.LEGACY_ERROR_ANCHOR,
+            ),
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "adapter.py"
+            path.write_text(legacy_source, encoding="utf-8")
+            module.patch(path)
+            upgraded = path.read_text(encoding="utf-8")
+            module.patch(path)
+            second = path.read_text(encoding="utf-8")
+
+        self.assertEqual(upgraded, second)
+        self.assertIn(module.MARKER, upgraded)
+        self.assertNotIn(module.LEGACY_MARKER, upgraded)
+        self.assertEqual(
+            upgraded.count("await self.reset_session(session_id)"),
+            3,
+        )
 
 
 class StopCommandPatchTest(unittest.TestCase):

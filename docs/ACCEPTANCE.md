@@ -77,10 +77,12 @@
 - [ ] 钉钉只显示最终回答，不显示 reasoning 和冗长工具轨迹
 - [ ] `./scripts/codex-status.sh` 显示 `turn_recovery_patch=installed`
 - [ ] `./scripts/codex-status.sh` 显示 `turn_timeout_patch=installed`
+- [ ] `./scripts/codex-status.sh` 显示 `interrupted_thread_reset=true`
 - [ ] `./scripts/codex-status.sh` 显示 `native_stop_patch=installed`
 - [ ] `./scripts/codex-status.sh` 显示 `turn_timeout_seconds=600`
 - [ ] 长任务执行期间重启容器后，旧 `Thinking` 状态被撤回并收到明确中断通知
 - [ ] 长任务期间发送 `/stop`，当前任务被取消且不出现 `Unsupported Codex command`
+- [ ] `/stop` 后直接发送普通消息，自动创建新 Codex 线程且无需运行恢复脚本
 - [ ] 模拟超时后任务自动结束，后续 `/new` 与普通消息可继续处理
 - [ ] 重启恢复通知不包含原始问题、模型输出或内部存储路径
 - [ ] 旧系统 Current Turn Guard、中断恢复和重启通知只有完成当前运行链路的等价回归后，才能标记为已具备
