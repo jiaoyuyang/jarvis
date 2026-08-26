@@ -1,8 +1,10 @@
+import asyncio
 import importlib.util
 import os
 from pathlib import Path
 import py_compile
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 
@@ -52,10 +54,54 @@ class MessageRenderer:
 
 def dingtalk_fixture(module) -> str:
     return (
-        '''from typing import Any, Dict, Optional
+        '''import logging
+from typing import Any, Dict, Optional
+
+
+logger = logging.getLogger(__name__)
+
+
+class ContentType:
+    IMAGE = "image"
+    FILE = "file"
+    VIDEO = "video"
+    AUDIO = "audio"
 
 
 class DingTalkChannel:
+    def __init__(self):
+        self.sent_payloads = []
+
+    async def _send_payload_via_session_webhook(self, webhook, payload):
+        self.sent_payloads.append((webhook, payload))
+        return True
+
+    async def _send_media_part_via_webhook(
+        self,
+        session_webhook,
+        part,
+    ):
+        upload_type = "image"
+        filename = "chart.png"
+        ext = "png"
+        media_id = "@generated_chart"
+        if media_id:
+'''
+        + module.DINGTALK_EXISTING_IMAGE_MEDIA_ANCHOR
+        + '''
+
+    async def _send_uploaded_image_media_id(
+        self,
+        session_webhook,
+        part,
+    ):
+        upload_type = "image"
+        filename = "chart.png"
+        ext = "png"
+        media_id = "@uploaded_chart"
+'''
+        + module.DINGTALK_UPLOADED_IMAGE_MEDIA_ANCHOR
+        + '''
 '''
         + module.DINGTALK_ANCHOR
     )
@@ -93,6 +139,37 @@ class LocalArtifactDeliveryPatchTest(unittest.TestCase):
         self.assertIn(self.module.DINGTALK_MARKER, first_dingtalk)
         self.assertIn("failed_count", first_dingtalk)
         self.assertIn("发送到钉钉失败", first_dingtalk)
+        self.assertNotIn("media_id for inline image preview", first_dingtalk)
+        self.assertEqual(first_dingtalk.count('"msgtype": "image"'), 2)
+        self.assertEqual(first_dingtalk.count('"media_id": media_id'), 2)
+
+    def test_uploaded_image_uses_native_dingtalk_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            dingtalk = Path(temp_dir) / "channel.py"
+            dingtalk.write_text(dingtalk_fixture(self.module), encoding="utf-8")
+            self.module.patch_dingtalk(dingtalk)
+            patched = load_module("patched_dingtalk_native_image", dingtalk)
+            channel = patched.DingTalkChannel()
+            result = asyncio.run(
+                channel._send_uploaded_image_media_id(
+                    "https://oapi.dingtalk.com/robot/sendBySession",
+                    SimpleNamespace(type=patched.ContentType.IMAGE),
+                ),
+            )
+
+        self.assertTrue(result)
+        self.assertEqual(
+            channel.sent_payloads,
+            [
+                (
+                    "https://oapi.dingtalk.com/robot/sendBySession",
+                    {
+                        "msgtype": "image",
+                        "image": {"media_id": "@uploaded_chart"},
+                    },
+                ),
+            ],
+        )
 
     def test_image_link_becomes_one_uploadable_media_part(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
