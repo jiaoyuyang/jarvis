@@ -87,10 +87,10 @@ class DingTalkChannel:
         media_id = "@generated_chart"
         if media_id:
 '''
-        + module.DINGTALK_IMAGE_MEDIA_ANCHOR
+        + module.DINGTALK_EXISTING_IMAGE_MEDIA_ANCHOR
         + '''
 
-    async def _send_existing_image_media_id(
+    async def _send_uploaded_image_media_id(
         self,
         session_webhook,
         part,
@@ -98,10 +98,9 @@ class DingTalkChannel:
         upload_type = "image"
         filename = "chart.png"
         ext = "png"
-        media_id = "@existing_chart"
-        if media_id:
+        media_id = "@uploaded_chart"
 '''
-        + module.DINGTALK_IMAGE_MEDIA_ANCHOR
+        + module.DINGTALK_UPLOADED_IMAGE_MEDIA_ANCHOR
         + '''
 '''
         + module.DINGTALK_ANCHOR
@@ -152,7 +151,7 @@ class LocalArtifactDeliveryPatchTest(unittest.TestCase):
             patched = load_module("patched_dingtalk_native_image", dingtalk)
             channel = patched.DingTalkChannel()
             result = asyncio.run(
-                channel._send_media_part_via_webhook(
+                channel._send_uploaded_image_media_id(
                     "https://oapi.dingtalk.com/robot/sendBySession",
                     SimpleNamespace(type=patched.ContentType.IMAGE),
                 ),
@@ -166,7 +165,7 @@ class LocalArtifactDeliveryPatchTest(unittest.TestCase):
                     "https://oapi.dingtalk.com/robot/sendBySession",
                     {
                         "msgtype": "image",
-                        "image": {"media_id": "@generated_chart"},
+                        "image": {"media_id": "@uploaded_chart"},
                     },
                 ),
             ],
