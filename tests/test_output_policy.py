@@ -53,6 +53,9 @@ class OutputPolicyTest(unittest.TestCase):
             encoding="utf-8"
         )
         dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+        status_script = (ROOT / "scripts/codex-status.sh").read_text(
+            encoding="utf-8"
+        )
 
         self.assertIn("版本：2.2", skill)
         self.assertIn("file:///app/working/weather_trend.png", skill)
@@ -66,6 +69,10 @@ class OutputPolicyTest(unittest.TestCase):
         self.assertIn("timeout 60s python", chart_skill)
         self.assertIn("不得使用 matplotlib、ImageGen", chart_skill)
         self.assertIn("fonts-wqy-zenhei", dockerfile)
+        self.assertIn("artifact_renderer_patch=", status_script)
+        self.assertIn("chart_skill=", status_script)
+        self.assertIn("chart_renderer=", status_script)
+        self.assertIn("chart_font=", status_script)
 
     def test_turn_closure_does_not_store_every_reply(self) -> None:
         persona = (ROOT / "persona/AGENTS.md").read_text(encoding="utf-8")
