@@ -70,6 +70,9 @@ class OutputPolicyTest(unittest.TestCase):
         self.assertIn("不得使用 matplotlib、ImageGen", chart_skill)
         self.assertIn("fonts-wqy-zenhei", dockerfile)
         self.assertIn("artifact_renderer_patch=", status_script)
+        self.assertIn(
+            "JARVIS_DINGTALK_MEDIA_RECEIPT_PATCH_V2", status_script
+        )
         self.assertIn("chart_skill=", status_script)
         self.assertIn("chart_renderer=", status_script)
         self.assertIn("chart_font=", status_script)
