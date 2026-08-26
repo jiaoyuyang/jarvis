@@ -70,7 +70,7 @@ artifact_renderer_installed = (
     "JARVIS_LOCAL_ARTIFACT_RENDERER_PATCH_V1" in renderer_source
 )
 media_receipt_installed = (
-    "JARVIS_DINGTALK_MEDIA_RECEIPT_PATCH_V1" in dingtalk_source
+    "JARVIS_DINGTALK_MEDIA_RECEIPT_PATCH_V2" in dingtalk_source
 )
 print(
     "artifact_renderer_patch="
