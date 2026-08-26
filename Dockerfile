@@ -24,6 +24,7 @@ COPY patches/patch_qwenpaw_codex_final_only.py /opt/jarvis/patches/patch_qwenpaw
 COPY patches/patch_qwenpaw_codex_turn_timeout.py /opt/jarvis/patches/patch_qwenpaw_codex_turn_timeout.py
 COPY patches/patch_qwenpaw_stop_command.py /opt/jarvis/patches/patch_qwenpaw_stop_command.py
 COPY patches/patch_qwenpaw_dingtalk_turn_recovery.py /opt/jarvis/patches/patch_qwenpaw_dingtalk_turn_recovery.py
+COPY patches/patch_qwenpaw_local_artifact_delivery.py /opt/jarvis/patches/patch_qwenpaw_local_artifact_delivery.py
 
 RUN /app/venv/bin/python \
         /opt/jarvis/patches/patch_qwenpaw_codex_final_only.py \
@@ -33,10 +34,14 @@ RUN /app/venv/bin/python \
         /opt/jarvis/patches/patch_qwenpaw_stop_command.py \
     && /app/venv/bin/python \
         /opt/jarvis/patches/patch_qwenpaw_dingtalk_turn_recovery.py \
+    && /app/venv/bin/python \
+        /opt/jarvis/patches/patch_qwenpaw_local_artifact_delivery.py \
     && /app/venv/bin/python -c \
         "import py_compile; from qwenpaw.harnesses.codex import adapter; py_compile.compile(adapter.__file__, doraise=True)" \
     && /app/venv/bin/python -c \
         "import py_compile; from qwenpaw.app.channels import base; py_compile.compile(base.__file__, doraise=True)" \
+    && /app/venv/bin/python -c \
+        "import py_compile; from qwenpaw.app.channels import renderer; py_compile.compile(renderer.__file__, doraise=True)" \
     && /app/venv/bin/python -c \
         "import py_compile; from qwenpaw.app.channels.dingtalk import channel; py_compile.compile(channel.__file__, doraise=True)" \
     && /app/venv/bin/python -c \
