@@ -34,7 +34,7 @@ metadata:
 4. 使用固定命令生成 PNG，命令执行上限 60 秒：
 
 ```bash
-timeout 60s python /opt/jarvis/skills/jarvis-chart/scripts/render_chart.py \
+timeout 60s /app/venv/bin/python /opt/jarvis/skills/jarvis-chart/scripts/render_chart.py \
   --input /app/working/chart_input.json \
   --output /app/working/chart_output.png
 ```
