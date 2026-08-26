@@ -11,6 +11,7 @@ from PIL import Image
 
 ROOT = Path(__file__).parents[1]
 SCRIPT = ROOT / "skills/jarvis-chart/scripts/render_chart.py"
+SKILL = ROOT / "skills/jarvis-chart/SKILL.md"
 
 
 class ChartRendererTest(unittest.TestCase):
@@ -69,6 +70,11 @@ class ChartRendererTest(unittest.TestCase):
                 colors = image.convert("RGB").getcolors(maxcolors=1_000_000)
                 self.assertIsNotNone(colors)
                 self.assertGreater(len(colors or []), 8)
+
+    def test_skill_uses_the_container_venv_interpreter(self) -> None:
+        instructions = SKILL.read_text(encoding="utf-8")
+        self.assertIn("timeout 60s /app/venv/bin/python ", instructions)
+        self.assertNotIn("timeout 60s python ", instructions)
 
     def test_rejects_paths_outside_working_directory(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
