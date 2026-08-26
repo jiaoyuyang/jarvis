@@ -15,13 +15,13 @@ fi
 
 docker compose exec -T -e JARVIS_WORKSPACE="$WORKSPACE" jarvis sh -eu -c '
   workspace="$JARVIS_WORKSPACE"
-  for skill in jarvis-memory jarvis-intake jarvis-management-writing jarvis-project jarvis-presentation; do
+  for skill in jarvis-chart jarvis-memory jarvis-intake jarvis-management-writing jarvis-project jarvis-presentation; do
     test -f "$workspace/skills/$skill/SKILL.md"
     echo "$skill=installed"
   done
-  grep -q "^版本：2.0$" "$workspace/skills/jarvis-presentation/SKILL.md"
+  grep -q "^版本：2.2$" "$workspace/skills/jarvis-presentation/SKILL.md"
   grep -q "^## 卡片化内容规则$" "$workspace/skills/jarvis-presentation/SKILL.md"
-  echo "presentation_version=2"
+  echo "presentation_version=2.2"
   python "$workspace/skills/jarvis-memory/scripts/memoryctl.py" \
     --workspace "$workspace" verify --rebuild
   python "$workspace/skills/jarvis-intake/scripts/intakectl.py" \
@@ -44,6 +44,7 @@ from qwenpaw.agents.skill_system import read_skill_manifest
 
 workspace = Path(os.environ["JARVIS_SKILL_WORKSPACE"])
 required = {
+    "jarvis-chart",
     "jarvis-memory",
     "jarvis-intake",
     "jarvis-management-writing",
