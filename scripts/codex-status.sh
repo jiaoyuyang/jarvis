@@ -18,6 +18,7 @@ from pathlib import Path
 
 from qwenpaw.app.channels.dingtalk import channel as dingtalk_channel
 from qwenpaw.app.channels import base as channel_base
+from qwenpaw.app.channels import renderer as channel_renderer
 from qwenpaw.harnesses.codex import adapter as codex_adapter
 
 path = Path("/app/working/workspaces/default/agent.json")
@@ -64,6 +65,36 @@ print(
 )
 if not recovery_installed:
     raise SystemExit("DingTalk turn recovery patch is missing")
+renderer_source = Path(channel_renderer.__file__).read_text(encoding="utf-8")
+artifact_renderer_installed = (
+    "JARVIS_LOCAL_ARTIFACT_RENDERER_PATCH_V1" in renderer_source
+)
+media_receipt_installed = (
+    "JARVIS_DINGTALK_MEDIA_RECEIPT_PATCH_V1" in dingtalk_source
+)
+print(
+    "artifact_renderer_patch="
+    + ("installed" if artifact_renderer_installed else "missing")
+)
+print(
+    "media_receipt_patch="
+    + ("installed" if media_receipt_installed else "missing")
+)
+if not (artifact_renderer_installed and media_receipt_installed):
+    raise SystemExit("DingTalk local artifact delivery patch is incomplete")
+chart_skill = Path("/opt/jarvis/skills/jarvis-chart/SKILL.md")
+chart_renderer = Path(
+    "/opt/jarvis/skills/jarvis-chart/scripts/render_chart.py"
+)
+chart_font = Path("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc")
+print(f"chart_skill={'installed' if chart_skill.is_file() else 'missing'}")
+print(
+    "chart_renderer="
+    + ("installed" if chart_renderer.is_file() else "missing")
+)
+print(f"chart_font={'installed' if chart_font.is_file() else 'missing'}")
+if not (chart_skill.is_file() and chart_renderer.is_file() and chart_font.is_file()):
+    raise SystemExit("Deterministic chart runtime is incomplete")
 message_type = dingtalk.get("message_type") or "markdown"
 template_configured = bool(dingtalk.get("card_template_id"))
 robot_configured = bool(
