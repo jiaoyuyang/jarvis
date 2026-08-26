@@ -12,11 +12,13 @@ RUN sed -i \
         /etc/supervisor/conf.d/supervisord.conf.template \
     && grep -q 'qwenpaw app --host 127.0.0.1' \
         /etc/supervisor/conf.d/supervisord.conf.template \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends fonts-wqy-zenhei \
     && if ! command -v rg >/dev/null 2>&1; then \
-         apt-get update \
-         && apt-get install -y --no-install-recommends ripgrep \
-         && rm -rf /var/lib/apt/lists/*; \
+         apt-get install -y --no-install-recommends ripgrep; \
        fi \
+    && test -r /usr/share/fonts/truetype/wqy/wqy-zenhei.ttc \
+    && rm -rf /var/lib/apt/lists/* \
     && /app/venv/bin/python -m pip install --no-cache-dir \
         "openai-codex==${OPENAI_CODEX_VERSION}"
 
