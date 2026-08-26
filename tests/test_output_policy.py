@@ -33,7 +33,7 @@ class OutputPolicyTest(unittest.TestCase):
         )
         persona = (ROOT / "persona/AGENTS.md").read_text(encoding="utf-8")
 
-        self.assertIn("版本：2.0", skill)
+        self.assertIn("版本：2.2", skill)
         self.assertIn("结论层", skill)
         self.assertIn("摘要层", skill)
         self.assertIn("行动层", skill)
@@ -49,15 +49,23 @@ class OutputPolicyTest(unittest.TestCase):
         skill = (ROOT / "skills/jarvis-presentation/SKILL.md").read_text(
             encoding="utf-8"
         )
+        chart_skill = (ROOT / "skills/jarvis-chart/SKILL.md").read_text(
+            encoding="utf-8"
+        )
         dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
 
-        self.assertIn("版本：2.1", skill)
+        self.assertIn("版本：2.2", skill)
         self.assertIn("file:///app/working/weather_trend.png", skill)
         self.assertIn("图表生成失败", skill)
         self.assertIn("不得说“已直接渲染在上方”", skill)
         self.assertIn("内部交付标记而非虚假送达描述", skill)
         self.assertIn("patch_qwenpaw_local_artifact_delivery.py", dockerfile)
         self.assertIn("from qwenpaw.app.channels import renderer", dockerfile)
+        self.assertIn("必须调用 `jarvis-chart`", skill)
+        self.assertIn("没有图片生成工具和 matplotlib", skill)
+        self.assertIn("timeout 60s python", chart_skill)
+        self.assertIn("不得使用 matplotlib、ImageGen", chart_skill)
+        self.assertIn("fonts-wqy-zenhei", dockerfile)
 
     def test_turn_closure_does_not_store_every_reply(self) -> None:
         persona = (ROOT / "persona/AGENTS.md").read_text(encoding="utf-8")
