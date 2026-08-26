@@ -8,20 +8,25 @@ cd "$PROJECT_DIR"
 # shellcheck source=_codex-runtime.sh
 source "$SCRIPT_DIR/_codex-runtime.sh"
 CODEX_BIN="$(resolve_codex_in_container)"
+AGENT_ID="${JARVIS_AGENT_ID:-default}"
 
 docker compose exec -T jarvis "$CODEX_BIN" --version
 docker compose exec -T jarvis "$CODEX_BIN" login status
 
-docker compose exec -T jarvis python - <<'PY'
+docker compose exec -T -e JARVIS_AGENT_ID="$AGENT_ID" jarvis python - <<'PY'
 import json
+import os
 from pathlib import Path
 
+from qwenpaw.agents.skill_system import read_skill_manifest
 from qwenpaw.app.channels.dingtalk import channel as dingtalk_channel
 from qwenpaw.app.channels import base as channel_base
 from qwenpaw.app.channels import renderer as channel_renderer
 from qwenpaw.harnesses.codex import adapter as codex_adapter
 
-path = Path("/app/working/workspaces/default/agent.json")
+agent_id = os.environ.get("JARVIS_AGENT_ID", "default")
+workspace = Path("/app/working/workspaces") / agent_id
+path = workspace / "agent.json"
 if not path.is_file():
     raise SystemExit(f"Agent config not found: {path}")
 data = json.loads(path.read_text(encoding="utf-8"))
@@ -38,82 +43,57 @@ print(f"final_only_patch={'installed' if patch_installed else 'missing'}")
 if settings.get("final_only") and not patch_installed:
     raise SystemExit("final_only is enabled but the Codex adapter patch is missing")
 timeout_installed = "JARVIS_CODEX_TURN_TIMEOUT_PATCH_V2" in adapter_source
-print(
-    "turn_timeout_patch="
-    + ("installed" if timeout_installed else "missing")
-)
+print("turn_timeout_patch=" + ("installed" if timeout_installed else "missing"))
 if not timeout_installed:
     raise SystemExit("Codex turn timeout patch is missing")
 print("interrupted_thread_reset=true")
-print(
-    "turn_timeout_seconds="
-    + str(settings.get("turn_timeout_seconds") or 600)
-)
+print("turn_timeout_seconds=" + str(settings.get("turn_timeout_seconds") or 600))
 base_source = Path(channel_base.__file__).read_text(encoding="utf-8")
 stop_installed = "JARVIS_STOP_COMMAND_PATCH_V1" in base_source
-print(
-    "native_stop_patch="
-    + ("installed" if stop_installed else "missing")
-)
+print("native_stop_patch=" + ("installed" if stop_installed else "missing"))
 if not stop_installed:
     raise SystemExit("native /stop patch is missing")
 dingtalk_source = Path(dingtalk_channel.__file__).read_text(encoding="utf-8")
 recovery_installed = "JARVIS_DINGTALK_TURN_RECOVERY_PATCH_V1" in dingtalk_source
-print(
-    "turn_recovery_patch="
-    + ("installed" if recovery_installed else "missing")
-)
+print("turn_recovery_patch=" + ("installed" if recovery_installed else "missing"))
 if not recovery_installed:
     raise SystemExit("DingTalk turn recovery patch is missing")
 renderer_source = Path(channel_renderer.__file__).read_text(encoding="utf-8")
-artifact_renderer_installed = (
-    "JARVIS_LOCAL_ARTIFACT_RENDERER_PATCH_V1" in renderer_source
-)
-media_receipt_installed = (
-    "JARVIS_DINGTALK_MEDIA_RECEIPT_PATCH_V2" in dingtalk_source
-)
-print(
-    "artifact_renderer_patch="
-    + ("installed" if artifact_renderer_installed else "missing")
-)
-print(
-    "media_receipt_patch="
-    + ("installed" if media_receipt_installed else "missing")
-)
+artifact_renderer_installed = "JARVIS_LOCAL_ARTIFACT_RENDERER_PATCH_V1" in renderer_source
+media_receipt_installed = "JARVIS_DINGTALK_MEDIA_RECEIPT_PATCH_V2" in dingtalk_source
+print("artifact_renderer_patch=" + ("installed" if artifact_renderer_installed else "missing"))
+print("media_receipt_patch=" + ("installed" if media_receipt_installed else "missing"))
 if not (artifact_renderer_installed and media_receipt_installed):
     raise SystemExit("DingTalk local artifact delivery patch is incomplete")
-chart_skill = Path("/opt/jarvis/skills/jarvis-chart/SKILL.md")
-chart_renderer = Path(
-    "/opt/jarvis/skills/jarvis-chart/scripts/render_chart.py"
-)
+
+chart_source = Path("/opt/jarvis/skills/jarvis-chart/SKILL.md")
+chart_skill = workspace / "skills/jarvis-chart/SKILL.md"
+chart_renderer = workspace / "skills/jarvis-chart/scripts/render_chart.py"
 chart_font = Path("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc")
+manifest = read_skill_manifest(workspace).get("skills", {})
+chart_enabled = bool(manifest.get("jarvis-chart", {}).get("enabled", False))
+print(f"chart_source={'installed' if chart_source.is_file() else 'missing'}")
 print(f"chart_skill={'installed' if chart_skill.is_file() else 'missing'}")
-print(
-    "chart_renderer="
-    + ("installed" if chart_renderer.is_file() else "missing")
-)
+print(f"chart_skill_manifest={'enabled' if chart_enabled else 'disabled'}")
+print("chart_renderer=" + ("installed" if chart_renderer.is_file() else "missing"))
 print(f"chart_font={'installed' if chart_font.is_file() else 'missing'}")
-if not (chart_skill.is_file() and chart_renderer.is_file() and chart_font.is_file()):
+if not (
+    chart_source.is_file()
+    and chart_skill.is_file()
+    and chart_enabled
+    and chart_renderer.is_file()
+    and chart_font.is_file()
+):
     raise SystemExit("Deterministic chart runtime is incomplete")
+
 message_type = dingtalk.get("message_type") or "markdown"
 template_configured = bool(dingtalk.get("card_template_id"))
-robot_configured = bool(
-    dingtalk.get("robot_code") or dingtalk.get("client_id")
-)
+robot_configured = bool(dingtalk.get("robot_code") or dingtalk.get("client_id"))
 print(f"dingtalk_message_type={message_type}")
-print(
-    "dingtalk_card_template="
-    + ("configured" if template_configured else "missing")
-)
+print("dingtalk_card_template=" + ("configured" if template_configured else "missing"))
 print(f"dingtalk_card_key={dingtalk.get('card_template_key') or 'content'}")
-print(
-    "dingtalk_robot_code="
-    + ("configured" if robot_configured else "missing")
-)
-print(
-    "dingtalk_card_streaming="
-    + str(bool(dingtalk.get("streaming_enabled", False))).lower()
-)
+print("dingtalk_robot_code=" + ("configured" if robot_configured else "missing"))
+print("dingtalk_card_streaming=" + str(bool(dingtalk.get("streaming_enabled", False))).lower())
 if message_type == "card" and not (template_configured and robot_configured):
     raise SystemExit("DingTalk card mode is incomplete")
 print(f"model={settings.get('model') or 'account default'}")

@@ -3,10 +3,6 @@ FROM ${QWENPAW_IMAGE}
 
 ARG OPENAI_CODEX_VERSION=0.144.4
 
-# QwenPaw keeps third-party runtimes optional. Install the exact Codex
-# version pinned by the selected QwenPaw release, plus ripgrep for the
-# local knowledge-search skill. Keep this layer independent from Jarvis
-# patches so later reliability fixes do not repeat large downloads.
 RUN sed -i \
         's/qwenpaw app --host 0.0.0.0/qwenpaw app --host 127.0.0.1/' \
         /etc/supervisor/conf.d/supervisord.conf.template \
@@ -27,6 +23,8 @@ COPY patches/patch_qwenpaw_codex_turn_timeout.py /opt/jarvis/patches/patch_qwenp
 COPY patches/patch_qwenpaw_stop_command.py /opt/jarvis/patches/patch_qwenpaw_stop_command.py
 COPY patches/patch_qwenpaw_dingtalk_turn_recovery.py /opt/jarvis/patches/patch_qwenpaw_dingtalk_turn_recovery.py
 COPY patches/patch_qwenpaw_local_artifact_delivery.py /opt/jarvis/patches/patch_qwenpaw_local_artifact_delivery.py
+COPY scripts/sync-managed-skills.py /opt/jarvis/scripts/sync-managed-skills.py
+COPY scripts/container-entrypoint.sh /opt/jarvis/scripts/container-entrypoint.sh
 
 RUN /app/venv/bin/python \
         /opt/jarvis/patches/patch_qwenpaw_codex_final_only.py \
@@ -47,6 +45,10 @@ RUN /app/venv/bin/python \
     && /app/venv/bin/python -c \
         "import py_compile; from qwenpaw.app.channels.dingtalk import channel; py_compile.compile(channel.__file__, doraise=True)" \
     && /app/venv/bin/python -c \
-        "from qwenpaw.harnesses.codex.discovery import resolve_codex_binary; assert resolve_codex_binary() is not None"
+        "from qwenpaw.harnesses.codex.discovery import resolve_codex_binary; assert resolve_codex_binary() is not None" \
+    && chmod 0755 /opt/jarvis/scripts/container-entrypoint.sh \
+        /opt/jarvis/scripts/sync-managed-skills.py
 
 ENV CODEX_HOME=/root/.codex
+
+CMD ["/opt/jarvis/scripts/container-entrypoint.sh"]
