@@ -23,7 +23,7 @@ from pathlib import Path
 
 
 RENDERER_MARKER = "# JARVIS_LOCAL_ARTIFACT_RENDERER_PATCH_V1"
-DINGTALK_MARKER = "# JARVIS_DINGTALK_MEDIA_RECEIPT_PATCH_V1"
+DINGTALK_MARKER = "# JARVIS_DINGTALK_MEDIA_RECEIPT_PATCH_V2"
 
 RENDERER_IMPORT_ANCHOR = """import json
 import logging
@@ -185,6 +185,50 @@ DINGTALK_ANCHOR = '''    async def _deliver_media_parts(
                     )
 '''
 
+DINGTALK_IMAGE_MEDIA_ANCHOR = '''            if upload_type == "image":
+                # Use markdown with media_id for inline image preview
+                payload = {
+                    "msgtype": "markdown",
+                    "markdown": {
+                        "title": filename or "image",
+                        "text": f"![{filename or 'image'}]({media_id})",
+                    },
+                }
+                ok = await self._send_payload_via_session_webhook(
+                    session_webhook,
+                    payload,
+                )
+                if ok:
+                    return True
+                # Fallback to file card if markdown fails
+                payload = {
+                    "msgtype": "file",
+                    "file": {
+                        "mediaId": media_id,
+                        "fileType": ext,
+                        "fileName": filename,
+                    },
+                }
+                return await self._send_payload_via_session_webhook(
+                    session_webhook,
+                    payload,
+                )
+'''
+
+DINGTALK_IMAGE_MEDIA_REPLACEMENT = '''            if upload_type == "image":
+                # A DingTalk media_id is not a public URL.  Embedding it in
+                # Markdown can be accepted by the API while rendering only a
+                # grey placeholder in clients.  Send a native image message.
+                payload = {
+                    "msgtype": "image",
+                    "image": {"media_id": media_id},
+                }
+                return await self._send_payload_via_session_webhook(
+                    session_webhook,
+                    payload,
+                )
+'''
+
 DINGTALK_REPLACEMENT = f'''    async def _deliver_media_parts(
         self,
         parts: list,
@@ -273,6 +317,21 @@ def _replace_once(source: str, anchor: str, replacement: str, label: str) -> str
     return source.replace(anchor, replacement)
 
 
+def _replace_exact_count(
+    source: str,
+    anchor: str,
+    replacement: str,
+    label: str,
+    expected: int,
+) -> str:
+    if source.count(anchor) != expected:
+        raise SystemExit(
+            f"QwenPaw {label} anchor did not match exactly {expected} times; "
+            "review the pinned upstream version before rebuilding",
+        )
+    return source.replace(anchor, replacement)
+
+
 def patch_renderer(path: Path) -> None:
     source = path.read_text(encoding="utf-8")
     if RENDERER_MARKER in source:
@@ -310,6 +369,13 @@ def patch_dingtalk(path: Path) -> None:
         DINGTALK_ANCHOR,
         DINGTALK_REPLACEMENT,
         "DingTalk media delivery",
+    )
+    source = _replace_exact_count(
+        source,
+        DINGTALK_IMAGE_MEDIA_ANCHOR,
+        DINGTALK_IMAGE_MEDIA_REPLACEMENT,
+        "DingTalk native image delivery",
+        2,
     )
     path.write_text(source, encoding="utf-8")
     print(f"Applied Jarvis DingTalk media receipt patch: {path}")
