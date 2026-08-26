@@ -45,6 +45,20 @@ class OutputPolicyTest(unittest.TestCase):
         self.assertIn("结论—摘要—行动", persona)
         self.assertIn("第一屏必须看到核心判断", persona)
 
+    def test_chart_delivery_requires_a_real_local_artifact(self) -> None:
+        skill = (ROOT / "skills/jarvis-presentation/SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+        self.assertIn("版本：2.1", skill)
+        self.assertIn("file:///app/working/weather_trend.png", skill)
+        self.assertIn("图表生成失败", skill)
+        self.assertIn("不得说“已直接渲染在上方”", skill)
+        self.assertIn("内部交付标记而非虚假送达描述", skill)
+        self.assertIn("patch_qwenpaw_local_artifact_delivery.py", dockerfile)
+        self.assertIn("from qwenpaw.app.channels import renderer", dockerfile)
+
     def test_turn_closure_does_not_store_every_reply(self) -> None:
         persona = (ROOT / "persona/AGENTS.md").read_text(encoding="utf-8")
         memory = (ROOT / "skills/jarvis-memory/SKILL.md").read_text(
