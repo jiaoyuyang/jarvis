@@ -27,23 +27,37 @@ class OutputPolicyTest(unittest.TestCase):
         self.assertIn("不使用 Mermaid、HTML", skill)
         self.assertIn("所有最终答复遵循 `jarvis-presentation`", persona)
 
-    def test_presentation_v2_controls_card_density(self) -> None:
+    def test_presentation_v23_is_mobile_first(self) -> None:
         skill = (ROOT / "skills/jarvis-presentation/SKILL.md").read_text(
             encoding="utf-8"
         )
         persona = (ROOT / "persona/AGENTS.md").read_text(encoding="utf-8")
 
-        self.assertIn("版本：2.2", skill)
+        self.assertIn("版本：2.3", skill)
+        self.assertIn("移动端优先原则", skill)
         self.assertIn("结论层", skill)
         self.assertIn("摘要层", skill)
         self.assertIn("行动层", skill)
         self.assertIn("默认最多四个内容区块", skill)
         self.assertIn("固定四维速览外，每个区块最多三个要点", skill)
-        self.assertIn("600—900 个汉字", skill)
+        self.assertIn("400—700 个汉字", skill)
+        self.assertIn("钉钉窄屏下一般不超过三列", skill)
         self.assertIn("不使用一级 Markdown 标题", skill)
         self.assertIn("表格单元格使用纯文本", skill)
         self.assertIn("结论—摘要—行动", persona)
         self.assertIn("第一屏必须看到核心判断", persona)
+
+    def test_media_delivery_does_not_narrate_the_process(self) -> None:
+        skill = (ROOT / "skills/jarvis-presentation/SKILL.md").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("不复述用户问题", skill)
+        self.assertIn("图片交付时不得发送", skill)
+        self.assertIn("将生成并发送", skill)
+        self.assertIn("生成的图表见下方", skill)
+        self.assertIn("图片前的文字必须包含实际信息", skill)
+        self.assertIn("代码块只用于代码、命令", skill)
 
     def test_chart_delivery_requires_a_real_local_artifact(self) -> None:
         skill = (ROOT / "skills/jarvis-presentation/SKILL.md").read_text(
@@ -57,7 +71,7 @@ class OutputPolicyTest(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertIn("版本：2.2", skill)
+        self.assertIn("版本：2.3", skill)
         self.assertIn("file:///app/working/weather_trend.png", skill)
         self.assertIn("图表生成失败", skill)
         self.assertIn("不得说“已直接渲染在上方”", skill)
