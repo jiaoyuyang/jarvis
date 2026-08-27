@@ -71,6 +71,21 @@ class ContentType:
 class DingTalkChannel:
     def __init__(self):
         self.sent_payloads = []
+        self.open_api_parts = []
+
+    def _is_public_http_url(self, value):
+        return isinstance(value, str) and value.startswith(("http://", "https://"))
+
+    async def _resolve_open_api_params_from_handle(self, to_handle, meta):
+        return {
+            "conversation_id": meta.get("conversation_id", "cid"),
+            "conversation_type": meta.get("conversation_type", "group"),
+            "sender_staff_id": meta.get("sender_staff_id", "staff"),
+        }
+
+    async def _send_media_part_via_open_api(self, part, **params):
+        self.open_api_parts.append((part, params))
+        return True
 
     async def _send_payload_via_session_webhook(self, webhook, payload):
         self.sent_payloads.append((webhook, payload))
@@ -102,6 +117,22 @@ class DingTalkChannel:
 '''
         + module.DINGTALK_UPLOADED_IMAGE_MEDIA_ANCHOR
         + '''
+
+    async def _open_api_uploaded_media(self):
+        effective_upload_type = "image"
+        media_id = "@open_api_chart"
+        filename = "chart.png"
+        ext = "png"
+        conversation_id = "cid"
+        conversation_type = "group"
+        sender_staff_id = "staff"
+'''
+        + module.OPEN_API_UPLOADED_MEDIA_ANCHOR
+        + '''
+
+    async def _send_open_api_message(self, **payload):
+        self.sent_payloads.append(("open_api", payload))
+        return True
 '''
         + module.DINGTALK_ANCHOR
     )
@@ -142,6 +173,8 @@ class LocalArtifactDeliveryPatchTest(unittest.TestCase):
         self.assertNotIn("media_id for inline image preview", first_dingtalk)
         self.assertEqual(first_dingtalk.count('"msgtype": "image"'), 2)
         self.assertEqual(first_dingtalk.count('"media_id": media_id'), 2)
+        self.assertIn('msg_key="sampleImageMsg"', first_dingtalk)
+        self.assertIn('msg_param={"photoURL": media_id}', first_dingtalk)
 
     def test_uploaded_image_uses_native_dingtalk_payload(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -196,6 +229,55 @@ class LocalArtifactDeliveryPatchTest(unittest.TestCase):
         self.assertEqual(len(parts), 1)
         self.assertEqual(parts[0].image_url, chart.as_uri())
         self.assertEqual(clean.count("见下方图片"), 2)
+
+    def test_local_image_bypasses_webhook_and_uses_open_api(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            dingtalk = Path(temp_dir) / "channel.py"
+            dingtalk.write_text(dingtalk_fixture(self.module), encoding="utf-8")
+            self.module.patch_dingtalk(dingtalk)
+            patched = load_module("patched_dingtalk_open_api_route", dingtalk)
+            channel = patched.DingTalkChannel()
+            part = SimpleNamespace(
+                type=patched.ContentType.IMAGE,
+                image_url="file:///app/working/weather_chart.png",
+            )
+            asyncio.run(
+                channel._deliver_media_parts(
+                    [part],
+                    "https://oapi.dingtalk.com/robot/sendBySession",
+                    "dingtalk:sw:test",
+                    {"conversation_id": "cid"},
+                )
+            )
+
+        self.assertEqual(channel.sent_payloads, [])
+        self.assertEqual(len(channel.open_api_parts), 1)
+        self.assertIs(channel.open_api_parts[0][0], part)
+
+    def test_open_api_uploaded_image_uses_sample_image_message(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            dingtalk = Path(temp_dir) / "channel.py"
+            dingtalk.write_text(dingtalk_fixture(self.module), encoding="utf-8")
+            self.module.patch_dingtalk(dingtalk)
+            patched = load_module("patched_dingtalk_sample_image", dingtalk)
+            channel = patched.DingTalkChannel()
+            asyncio.run(channel._open_api_uploaded_media())
+
+        self.assertEqual(
+            channel.sent_payloads,
+            [
+                (
+                    "open_api",
+                    {
+                        "msg_key": "sampleImageMsg",
+                        "msg_param": {"photoURL": "@open_api_chart"},
+                        "conversation_id": "cid",
+                        "conversation_type": "group",
+                        "sender_staff_id": "staff",
+                    },
+                )
+            ],
+        )
 
     def test_outside_or_unsupported_file_is_never_exposed(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
