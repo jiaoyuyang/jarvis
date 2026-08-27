@@ -70,10 +70,12 @@ START_REPLACEMENT = f'''        """Start or resume a Codex thread and stream one
 '''
 
 STATE_ANCHOR = """        buffered_agent_order: list[str] = []
+        buffered_artifact_links: list[str] = []
         try:
 """
 
 STATE_REPLACEMENT = """        buffered_agent_order: list[str] = []
+        buffered_artifact_links: list[str] = []
         try:
 """
 
