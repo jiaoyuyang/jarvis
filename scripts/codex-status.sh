@@ -69,6 +69,7 @@ if not (artifact_renderer_installed and media_receipt_installed):
 chart_source = Path("/opt/jarvis/skills/jarvis-chart/SKILL.md")
 chart_skill = workspace / "skills/jarvis-chart/SKILL.md"
 chart_renderer = workspace / "skills/jarvis-chart/scripts/render_chart.py"
+weather_renderer = workspace / "skills/jarvis-chart/scripts/render_weather_chart.py"
 chart_font = Path("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc")
 chart_python = Path("/app/venv/bin/python")
 manifest = read_skill_manifest(workspace).get("skills", {})
@@ -77,6 +78,7 @@ print(f"chart_source={'installed' if chart_source.is_file() else 'missing'}")
 print(f"chart_skill={'installed' if chart_skill.is_file() else 'missing'}")
 print(f"chart_skill_manifest={'enabled' if chart_enabled else 'disabled'}")
 print("chart_renderer=" + ("installed" if chart_renderer.is_file() else "missing"))
+print("weather_renderer=" + ("installed" if weather_renderer.is_file() else "missing"))
 print(f"chart_font={'installed' if chart_font.is_file() else 'missing'}")
 print(f"chart_python={'installed' if chart_python.is_file() else 'missing'}")
 if not (
@@ -84,6 +86,7 @@ if not (
     and chart_skill.is_file()
     and chart_enabled
     and chart_renderer.is_file()
+    and weather_renderer.is_file()
     and chart_font.is_file()
     and chart_python.is_file()
 ):
