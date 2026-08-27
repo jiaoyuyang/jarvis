@@ -23,7 +23,7 @@ from pathlib import Path
 
 
 RENDERER_MARKER = "# JARVIS_LOCAL_ARTIFACT_RENDERER_PATCH_V1"
-DINGTALK_MARKER = "# JARVIS_DINGTALK_MEDIA_RECEIPT_PATCH_V2"
+DINGTALK_MARKER = "# JARVIS_DINGTALK_MEDIA_RECEIPT_PATCH_V3"
 
 RENDERER_IMPORT_ANCHOR = """import json
 import logging
@@ -185,6 +185,45 @@ DINGTALK_ANCHOR = '''    async def _deliver_media_parts(
                     )
 '''
 
+OPEN_API_UPLOADED_MEDIA_ANCHOR = '''        # Send via Open API with appropriate msgKey
+        # Note: sampleImageMsg does not support mediaId, so we send as
+        # sampleFile for all media types including images.
+        return await self._send_open_api_message(
+            msg_key="sampleFile",
+            msg_param={
+                "mediaId": media_id,
+                "fileName": filename,
+                "fileType": ext,
+            },
+            conversation_id=conversation_id,
+            conversation_type=conversation_type,
+            sender_staff_id=sender_staff_id,
+        )
+'''
+
+OPEN_API_UPLOADED_MEDIA_REPLACEMENT = '''        # DingTalk sampleImageMsg accepts either a complete public URL or
+        # an uploaded mediaId in photoURL. Keep generated PNGs inline.
+        if effective_upload_type == "image":
+            return await self._send_open_api_message(
+                msg_key="sampleImageMsg",
+                msg_param={"photoURL": media_id},
+                conversation_id=conversation_id,
+                conversation_type=conversation_type,
+                sender_staff_id=sender_staff_id,
+            )
+        return await self._send_open_api_message(
+            msg_key="sampleFile",
+            msg_param={
+                "mediaId": media_id,
+                "fileName": filename,
+                "fileType": ext,
+            },
+            conversation_id=conversation_id,
+            conversation_type=conversation_type,
+            sender_staff_id=sender_staff_id,
+        )
+'''
+
 DINGTALK_EXISTING_IMAGE_MEDIA_ANCHOR = '''            if upload_type == "image":
                 # Use markdown with media_id for inline image preview
                 payload = {
@@ -298,7 +337,15 @@ DINGTALK_REPLACEMENT = f'''    async def _deliver_media_parts(
             if pt not in _types:
                 continue
             sent = False
-            if webhook:
+            image_url = getattr(part, "image_url", None) or ""
+            local_image = (
+                pt == ContentType.IMAGE
+                and not self._is_public_http_url(image_url)
+            )
+            # sessionWebhook can display public picURL images, but an
+            # uploaded media_id is not a public Markdown/image URL. Route
+            # local images straight to OpenAPI sampleImageMsg.
+            if webhook and not local_image:
                 sent = await self._send_media_part_via_webhook(
                     webhook,
                     part,
@@ -410,6 +457,12 @@ def patch_dingtalk(path: Path) -> None:
         DINGTALK_UPLOADED_IMAGE_MEDIA_ANCHOR,
         DINGTALK_UPLOADED_IMAGE_MEDIA_REPLACEMENT,
         "DingTalk uploaded native image delivery",
+    )
+    source = _replace_once(
+        source,
+        OPEN_API_UPLOADED_MEDIA_ANCHOR,
+        OPEN_API_UPLOADED_MEDIA_REPLACEMENT,
+        "DingTalk OpenAPI uploaded image delivery",
     )
     path.write_text(source, encoding="utf-8")
     print(f"Applied Jarvis DingTalk media receipt patch: {path}")
