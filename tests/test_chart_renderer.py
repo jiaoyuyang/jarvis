@@ -11,6 +11,7 @@ from PIL import Image
 
 ROOT = Path(__file__).parents[1]
 SCRIPT = ROOT / "skills/jarvis-chart/scripts/render_chart.py"
+WEATHER_SCRIPT = ROOT / "skills/jarvis-chart/scripts/render_weather_chart.py"
 SKILL = ROOT / "skills/jarvis-chart/SKILL.md"
 
 
@@ -73,8 +74,13 @@ class ChartRendererTest(unittest.TestCase):
 
     def test_skill_uses_the_container_venv_interpreter(self) -> None:
         instructions = SKILL.read_text(encoding="utf-8")
-        self.assertIn("timeout 60s /app/venv/bin/python ", instructions)
+        self.assertGreaterEqual(
+            instructions.count("timeout 60s /app/venv/bin/python"),
+            2,
+        )
         self.assertNotIn("timeout 60s python ", instructions)
+        self.assertIn("render_weather_chart.py", instructions)
+        self.assertTrue(WEATHER_SCRIPT.is_file())
 
     def test_rejects_paths_outside_working_directory(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

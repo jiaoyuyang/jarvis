@@ -11,9 +11,27 @@ metadata:
 本技能用于生成数据图表 PNG。当前运行环境没有图片生成工具，也没有 matplotlib；
 不得尝试调用不存在的图片工具、安装绘图库或等待模型自行绘图。
 
-## 固定流程
+## 天气趋势图固定流程
 
-1. 获取并核验数据，数据不足时直接说明缺口，不编造数值。
+天气趋势图不得由模型自行搜索数据或手工拼 JSON。直接使用内置取数与渲染脚本：
+
+```bash
+timeout 60s /app/venv/bin/python \
+  /opt/jarvis/skills/jarvis-chart/scripts/render_weather_chart.py \
+  --city '乌鲁木齐' \
+  --days 7 \
+  --output /app/working/weather_chart.png
+```
+
+- 将 `--city` 替换成用户要求的城市；城市名必须放在单引号内。
+- “最近 N 天”按“前 N-1 天 + 今日”处理，今日数值为最新预测，图表会明确标注。
+- 只有命令返回 `status=ok` 且输出文件存在时，最终答复才放入：
+  `[天气趋势图](file:///app/working/weather_chart.png)`。
+- 失败时直接复述脚本返回的简短原因，不得改用手工数据、其他网站或其他画图工具。
+
+## 通用数据图表固定流程
+
+1. 获取并核验用户给定的数据，数据不足时直接说明缺口，不编造数值。
 2. 在 `/app/working` 内创建一个不含空格的 ASCII JSON 文件。
 3. JSON 使用以下结构，`x_labels` 为 2—31 项，`series` 为 1—4 项：
 
