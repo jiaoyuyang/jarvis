@@ -1,14 +1,9 @@
 #!/usr/bin/env python3
 """Patch QwenPaw's Codex adapter to emit only the final agent message.
 
-QwenPaw forwards every Codex agentMessage item as a user-visible chat message.
-Codex may use earlier agent messages for plans or progress updates, which are
-useful internally but noisy in an assistant channel. This patch adds an opt-in
-backend_settings.final_only mode: agent messages are buffered for one turn and
-only the last non-empty message is emitted when the turn completes.
-
-The patch is intentionally strict about source anchors so an upstream change
-fails the image build instead of silently producing an unverified runtime.
+The patch also captures verified image artifact URLs from successful command
+output and attaches them to the final message, so delivery does not depend on
+the model repeating a local file link correctly.
 """
 
 from __future__ import annotations
@@ -18,7 +13,7 @@ import importlib.util
 from pathlib import Path
 
 
-MARKER = "# JARVIS_CODEX_FINAL_ONLY_PATCH_V1"
+MARKER = "# JARVIS_CODEX_FINAL_ONLY_PATCH_V2"
 
 STATE_ANCHOR = """        queue = client.subscribe()
         turn_id = ""
@@ -31,6 +26,7 @@ STATE_REPLACEMENT = f"""        queue = client.subscribe()
         final_only = bool(settings.get("final_only", False))
         buffered_agent_messages: dict[str, str] = {{}}
         buffered_agent_order: list[str] = []
+        buffered_artifact_links: list[str] = []
         try:
 """
 
@@ -55,7 +51,36 @@ LOOP_REPLACEMENT = """                method = str(message.get("method") or "")
                     continue
                 if final_only and method == "item/completed":
                     item = params.get("item") or {}
-                    if str(item.get("type") or "") == "agentMessage":
+                    item_type = str(item.get("type") or "")
+                    if item_type == "commandExecution":
+                        command_output = str(item.get("aggregatedOutput") or "")
+                        for output_line in reversed(command_output.splitlines()):
+                            try:
+                                output_payload = json.loads(output_line)
+                            except (json.JSONDecodeError, TypeError):
+                                continue
+                            artifact_url = (
+                                output_payload.get("output")
+                                if isinstance(output_payload, dict)
+                                and output_payload.get("status") == "ok"
+                                else None
+                            )
+                            if not isinstance(artifact_url, str):
+                                continue
+                            artifact_lower = artifact_url.lower()
+                            safe_artifact = (
+                                artifact_url.startswith("file:///app/working/")
+                                and artifact_lower.endswith(
+                                    (".png", ".jpg", ".jpeg", ".gif")
+                                )
+                            )
+                            if (
+                                safe_artifact
+                                and artifact_url not in buffered_artifact_links
+                            ):
+                                buffered_artifact_links.append(artifact_url)
+                            break
+                    if item_type == "agentMessage":
                         item_id = str(
                             item.get("id")
                             or params.get("itemId")
@@ -78,9 +103,15 @@ LOOP_REPLACEMENT = """                method = str(message.get("method") or "")
                         "",
                     )
                     if final_item_id:
+                        final_text = buffered_agent_messages[final_item_id]
+                        for artifact_url in buffered_artifact_links:
+                            if artifact_url not in final_text:
+                                final_text += (
+                                    "\\n\\n[生成的图表](" + artifact_url + ")"
+                                )
                         yield HarnessEvent(
                             kind=HarnessEventKind.TEXT_DELTA,
-                            text=buffered_agent_messages[final_item_id],
+                            text=final_text,
                             item_id=final_item_id,
                         )
                 event = self._convert_notification(message)
