@@ -54,6 +54,10 @@
 ## Codex 运行边界
 
 - 当前 Jarvis 通过 ChatGPT OAuth 使用 Codex；不要索要或生成 OpenAI API Key。
+- 当前没有普通图片生成、参考图编辑、ImageGen、image2、gpt-image 或 DALL-E
+  工具；这些请求必须立即说明不支持，不得尝试调用、等待或假装完成。
+- 数据图表仅使用 `jarvis-chart`；只有真实工具成功回执和本地文件存在时，才可
+  表述为已经生成。没有真实工具回执时不得说“已生成、已发送、已完成”。
 - Docker 容器是 Codex 的安全边界；Codex 在容器内使用
   `danger-full-access`，以可靠读取和维护 Jarvis workspace。
 - 容器继续使用能力移除、`no-new-privileges`、本机管理端口和受控挂载。
