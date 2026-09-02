@@ -80,12 +80,12 @@ class OutputPolicyTest(unittest.TestCase):
         self.assertIn("from qwenpaw.app.channels import renderer", dockerfile)
         self.assertIn("必须调用 `jarvis-chart`", skill)
         self.assertIn("没有图片生成工具和 matplotlib", skill)
-        self.assertIn("timeout 60s python", chart_skill)
+        self.assertIn("timeout 60s /app/venv/bin/python", chart_skill)
         self.assertIn("不得使用 matplotlib、ImageGen", chart_skill)
         self.assertIn("fonts-wqy-zenhei", dockerfile)
         self.assertIn("artifact_renderer_patch=", status_script)
         self.assertIn(
-            "JARVIS_DINGTALK_MEDIA_RECEIPT_PATCH_V2", status_script
+            "JARVIS_DINGTALK_MEDIA_RECEIPT_PATCH_V3", status_script
         )
         self.assertIn("chart_skill=", status_script)
         self.assertIn("chart_renderer=", status_script)

@@ -46,6 +46,15 @@ timeout_installed = "JARVIS_CODEX_TURN_TIMEOUT_PATCH_V2" in adapter_source
 print("turn_timeout_patch=" + ("installed" if timeout_installed else "missing"))
 if not timeout_installed:
     raise SystemExit("Codex turn timeout patch is missing")
+response_guard_installed = (
+    "JARVIS_CAPABILITY_RESPONSE_GUARD_V1" in adapter_source
+)
+print(
+    "capability_response_guard="
+    + ("installed" if response_guard_installed else "missing")
+)
+if not response_guard_installed:
+    raise SystemExit("Capability response guard is missing")
 print("interrupted_thread_reset=true")
 print("turn_timeout_seconds=" + str(settings.get("turn_timeout_seconds") or 600))
 base_source = Path(channel_base.__file__).read_text(encoding="utf-8")
@@ -53,6 +62,16 @@ stop_installed = "JARVIS_STOP_COMMAND_PATCH_V1" in base_source
 print("native_stop_patch=" + ("installed" if stop_installed else "missing"))
 if not stop_installed:
     raise SystemExit("native /stop patch is missing")
+request_gate_installed = "JARVIS_CAPABILITY_REQUEST_GATE_V1" in base_source
+print(
+    "capability_request_gate="
+    + ("installed" if request_gate_installed else "missing")
+)
+if not request_gate_installed:
+    raise SystemExit("Capability request gate is missing")
+print("generic_image_generation=unsupported")
+print("reference_image_editing=unsupported")
+print("deterministic_data_charts=supported")
 dingtalk_source = Path(dingtalk_channel.__file__).read_text(encoding="utf-8")
 recovery_installed = "JARVIS_DINGTALK_TURN_RECOVERY_PATCH_V1" in dingtalk_source
 print("turn_recovery_patch=" + ("installed" if recovery_installed else "missing"))
