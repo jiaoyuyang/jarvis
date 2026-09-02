@@ -47,6 +47,8 @@ GENERAL_VISUAL_TERMS = (
     "illustration",
     "poster",
     "photo",
+    "diagram",
+    "flowchart",
 )
 
 IMAGE_TERMS = (
@@ -67,6 +69,8 @@ IMAGE_TERMS = (
     "illustration",
     "poster",
     "photo",
+    "diagram",
+    "flowchart",
 )
 
 CREATE_TERMS = (
@@ -136,6 +140,7 @@ def is_unsupported_image_request(
 
     return bool(
         (has_image_word and (has_create or has_edit))
+        or (has_create and "图" in normalized)
         or any(
             term in normalized for term in ("画一张", "画一个", "画个")
         )
@@ -195,6 +200,7 @@ HELPER_REPLACEMENT = f'''    # {MARKER}
         )
         return bool(
             (has_image_word and (has_create or has_edit))
+            or (has_create and "图" in normalized)
             or any(
                 term in normalized
                 for term in ("画一张", "画一个", "画个")

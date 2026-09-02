@@ -35,6 +35,7 @@ class CapabilityRequestClassificationTest(unittest.TestCase):
             "用 image2 生成安庆围城场景",
             "制作一张历史题材海报",
             "画个湘军围攻安庆的场景",
+            "生成湘军围城图",
             "生成一张系统应用架构图",
             "生成一张包含折线图的营销海报",
             "draw an illustration of a historical siege",
