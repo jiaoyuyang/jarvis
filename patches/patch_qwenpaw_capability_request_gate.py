@@ -32,6 +32,23 @@ CHART_TERMS = (
     "bargraph",
 )
 
+GENERAL_VISUAL_TERMS = (
+    "插画",
+    "海报",
+    "照片",
+    "壁纸",
+    "封面图",
+    "场景图",
+    "人物图",
+    "流程图",
+    "架构图",
+    "示意图",
+    "思维导图",
+    "illustration",
+    "poster",
+    "photo",
+)
+
 IMAGE_TERMS = (
     "图片",
     "图像",
@@ -103,7 +120,11 @@ def is_unsupported_image_request(
     normalized = "".join((query or "").lower().split())
     if not normalized:
         return False
-    if any(term in normalized for term in CHART_TERMS):
+    is_chart_request = any(term in normalized for term in CHART_TERMS)
+    has_general_visual = any(
+        term in normalized for term in GENERAL_VISUAL_TERMS
+    )
+    if is_chart_request and not has_general_visual:
         return False
 
     has_create = any(term in normalized for term in CREATE_TERMS)
@@ -153,7 +174,14 @@ HELPER_REPLACEMENT = f'''    # {MARKER}
         if not normalized:
             return False
         chart_terms = {CHART_TERMS!r}
-        if any(term in normalized for term in chart_terms):
+        general_visual_terms = {GENERAL_VISUAL_TERMS!r}
+        is_chart_request = any(
+            term in normalized for term in chart_terms
+        )
+        has_general_visual = any(
+            term in normalized for term in general_visual_terms
+        )
+        if is_chart_request and not has_general_visual:
             return False
         image_terms = {IMAGE_TERMS!r}
         create_terms = {CREATE_TERMS!r}
