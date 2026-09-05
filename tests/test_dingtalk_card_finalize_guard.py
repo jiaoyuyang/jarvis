@@ -100,8 +100,17 @@ class DingTalkCardFinalizeGuardTest(unittest.TestCase):
         self.assertIn("for attempt, delay in enumerate", first)
         self.assertIn("await super()._finish_response_cycle(session_id)", first)
         self.assertIn("error_delivered_via_card", first)
-        self.assertIn("JARVIS_DINGTALK_CARD_FINALIZE_GUARD_V2", first)
+        self.assertIn("JARVIS_DINGTALK_CARD_FINALIZE_GUARD_V3", first)
         self.assertIn('state["jarvis_visible_complete"] = True', first)
+        self.assertEqual(first.count("and self.streaming_enabled"), 2)
+        self.assertNotIn(
+            "if self._ai_card_enabled() and conversation_id:",
+            first,
+        )
+        self.assertNotIn(
+            "if self._ai_card_enabled() and conversation_id and body.strip():",
+            first,
+        )
         self.assertIn(
             "await self._complete_inflight_turn(incoming_msg_id)",
             first,

@@ -7,11 +7,12 @@ finishes before that later callback runs, the completed text and Thinking
 reaction remain animated even though ``/stop`` correctly reports no task.
 Final API failures and cancellations can produce the same stale state.
 
-This patch makes the completed message event the visible terminal boundary,
-adds bounded retries for final card updates, a plain-message delivery fallback,
-explicit error-path closure, and cancellation cleanup based on Jarvis's minimal
-in-flight turn checkpoint.  No prompt or model output is persisted by this
-guard.
+This patch keeps cards only for true streaming mode.  When DingTalk streaming
+is disabled, inbound replies bypass the pre-created AI Card and use the
+sessionWebhook/Open API final-message path, avoiding cards that the DingTalk
+API can acknowledge without visibly leaving Processing.  Streaming cards still
+use bounded finalize retries and fallbacks.  No prompt or model output is
+persisted by this guard.
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ import importlib.util
 from pathlib import Path
 
 
-MARKER = "# JARVIS_DINGTALK_CARD_FINALIZE_GUARD_V2"
+MARKER = "# JARVIS_DINGTALK_CARD_FINALIZE_GUARD_V3"
 
 HELPER_ANCHOR = """    async def _mark_card_failed(self, conversation_id: str) -> None:
 """
@@ -100,6 +101,35 @@ HELPER_REPLACEMENT = f'''    {MARKER}
         return delivered
 
     async def _mark_card_failed(self, conversation_id: str) -> None:
+'''
+
+PRECREATE_CARD_ANCHOR = '''        # Pre-create AI Card before LLM call so user sees it immediately.
+        # The card is stored on request._precreated_card for streaming hooks
+        # and on_event_message_completed to reuse.
+        if self._ai_card_enabled() and conversation_id:
+'''
+
+PRECREATE_CARD_REPLACEMENT = '''        # Pre-create an AI Card only when true card streaming is enabled.
+        # Final-only replies use the ordinary message path because DingTalk
+        # can acknowledge a card finalize request while leaving it Processing.
+        if (
+            self._ai_card_enabled()
+            and conversation_id
+            and self.streaming_enabled
+        ):
+'''
+
+NONSTREAM_CARD_ANCHOR = '''        # -- Card mode: accumulate text into pre-created card (no finalize) --
+        if self._ai_card_enabled() and conversation_id and body.strip():
+'''
+
+NONSTREAM_CARD_REPLACEMENT = '''        # -- Card mode: only true streaming may use an inbound AI Card --
+        if (
+            self._ai_card_enabled()
+            and conversation_id
+            and body.strip()
+            and self.streaming_enabled
+        ):
 '''
 
 ERROR_STATE_ANCHOR = '''    async def _on_consume_error(
@@ -380,6 +410,8 @@ CYCLE_REPLACEMENT = '''    async def _finish_response_cycle(self, session_id: st
 
 REPLACEMENTS = (
     (HELPER_ANCHOR, HELPER_REPLACEMENT),
+    (PRECREATE_CARD_ANCHOR, PRECREATE_CARD_REPLACEMENT),
+    (NONSTREAM_CARD_ANCHOR, NONSTREAM_CARD_REPLACEMENT),
     (ERROR_STATE_ANCHOR, ERROR_STATE_REPLACEMENT),
     (ERROR_SEND_ANCHOR, ERROR_SEND_REPLACEMENT),
     (CYCLE_ANCHOR, CYCLE_REPLACEMENT),
