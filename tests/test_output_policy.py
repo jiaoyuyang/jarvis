@@ -77,6 +77,10 @@ class OutputPolicyTest(unittest.TestCase):
         self.assertIn("不得说“已直接渲染在上方”", skill)
         self.assertIn("内部交付标记而非虚假送达描述", skill)
         self.assertIn("patch_qwenpaw_local_artifact_delivery.py", dockerfile)
+        self.assertIn(
+            "patch_qwenpaw_dingtalk_card_finalize_guard.py",
+            dockerfile,
+        )
         self.assertIn("from qwenpaw.app.channels import renderer", dockerfile)
         self.assertIn("必须调用 `jarvis-chart`", skill)
         self.assertIn("没有图片生成工具和 matplotlib", skill)
@@ -84,6 +88,7 @@ class OutputPolicyTest(unittest.TestCase):
         self.assertIn("不得使用 matplotlib、ImageGen", chart_skill)
         self.assertIn("fonts-wqy-zenhei", dockerfile)
         self.assertIn("artifact_renderer_patch=", status_script)
+        self.assertIn("card_finalize_guard=", status_script)
         self.assertIn(
             "JARVIS_DINGTALK_MEDIA_RECEIPT_PATCH_V3", status_script
         )
