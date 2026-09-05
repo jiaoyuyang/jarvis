@@ -78,7 +78,7 @@ print("turn_recovery_patch=" + ("installed" if recovery_installed else "missing"
 if not recovery_installed:
     raise SystemExit("DingTalk turn recovery patch is missing")
 card_finalize_guard_installed = (
-    "JARVIS_DINGTALK_CARD_FINALIZE_GUARD_V1" in dingtalk_source
+    "JARVIS_DINGTALK_CARD_FINALIZE_GUARD_V2" in dingtalk_source
 )
 print(
     "card_finalize_guard="
