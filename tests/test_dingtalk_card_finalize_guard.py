@@ -100,6 +100,16 @@ class DingTalkCardFinalizeGuardTest(unittest.TestCase):
         self.assertIn("for attempt, delay in enumerate", first)
         self.assertIn("await super()._finish_response_cycle(session_id)", first)
         self.assertIn("error_delivered_via_card", first)
+        self.assertIn("JARVIS_DINGTALK_CARD_FINALIZE_GUARD_V2", first)
+        self.assertIn('state["jarvis_visible_complete"] = True', first)
+        self.assertIn(
+            "await self._complete_inflight_turn(incoming_msg_id)",
+            first,
+        )
+        self.assertNotIn(
+            "# Stream update (not finalize) so user sees progress",
+            first,
+        )
 
     def _load_helper_fixture(self, failures: int):
         helper = self.patch_module.HELPER_REPLACEMENT.rsplit(

@@ -2,16 +2,16 @@
 """Guarantee that DingTalk AI Cards leave their processing state.
 
 QwenPaw updates a non-streaming AI Card with completed message text and only
-marks the card final after the whole response loop exits.  If that final API
-call fails, or the response loop is cancelled after a partial update, the
-TaskTracker can already be idle while DingTalk still shows an animated,
-unfinished card.  The stale card looks like a running task even though
-``/stop`` correctly reports that no task is active.
+marks the card final after the whole response loop exits.  If the tracker
+finishes before that later callback runs, the completed text and Thinking
+reaction remain animated even though ``/stop`` correctly reports no task.
+Final API failures and cancellations can produce the same stale state.
 
-This patch adds bounded retries for final card updates, a plain-message
-delivery fallback, explicit error-path closure, and cancellation cleanup based
-on Jarvis's minimal in-flight turn checkpoint.  No prompt or model output is
-persisted by this guard.
+This patch makes the completed message event the visible terminal boundary,
+adds bounded retries for final card updates, a plain-message delivery fallback,
+explicit error-path closure, and cancellation cleanup based on Jarvis's minimal
+in-flight turn checkpoint.  No prompt or model output is persisted by this
+guard.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ import importlib.util
 from pathlib import Path
 
 
-MARKER = "# JARVIS_DINGTALK_CARD_FINALIZE_GUARD_V1"
+MARKER = "# JARVIS_DINGTALK_CARD_FINALIZE_GUARD_V2"
 
 HELPER_ANCHOR = """    async def _mark_card_failed(self, conversation_id: str) -> None:
 """
@@ -209,6 +209,119 @@ UNUSED_CARD_REPLACEMENT = '''            await self._jarvis_finalize_card_with_f
             )
 '''
 
+COMPLETED_MESSAGE_ANCHOR = '''                # Stream update (not finalize) so user sees progress
+                card_at = state.get("card_at_prefix") or ""
+                try:
+                    await self._stream_ai_card(
+                        card,
+                        card_at + merged,
+                        finalize=False,
+                    )
+                except Exception:
+                    logger.exception(
+                        "dingtalk on_event_message_completed: "
+                        "card stream failed, fallback to markdown",
+                    )
+                    await self._mark_card_failed(conversation_id)
+                    state.pop("nonstream_card", None)
+                    # Fall through to markdown mode below
+                else:
+                    # Deliver media parts separately (card only carries text)
+                    await self._deliver_media_parts(
+                        parts,
+                        session_webhook,
+                        to_handle,
+                        send_meta,
+                    )
+                    return
+'''
+
+COMPLETED_MESSAGE_REPLACEMENT = '''                # Jarvis final-only mode emits one completed user-visible
+                # message.  Finalize at that boundary instead of relying on a
+                # later process callback which may no longer run.
+                card_at = state.get("card_at_prefix") or ""
+                try:
+                    visible_complete = (
+                        await self._jarvis_finalize_card_with_fallback(
+                            card,
+                            card_at + merged,
+                            conversation_id,
+                            to_handle,
+                            send_meta,
+                        )
+                    )
+                except Exception:
+                    logger.exception(
+                        "dingtalk on_event_message_completed: "
+                        "terminal card update failed, fallback to markdown",
+                    )
+                    await self._mark_card_failed(conversation_id)
+                    visible_complete = False
+
+                state.pop("nonstream_card", None)
+                if visible_complete:
+                    state["jarvis_visible_complete"] = True
+                    incoming_msg_id = str(
+                        (send_meta or {}).get("message_id") or ""
+                    )
+                    if incoming_msg_id and conversation_id:
+                        await self._send_emotion(
+                            incoming_msg_id,
+                            conversation_id,
+                            "🤔Thinking",
+                            recall=True,
+                        )
+                        await self._send_emotion(
+                            incoming_msg_id,
+                            conversation_id,
+                            "🥳Done",
+                        )
+                    await self._complete_inflight_turn(incoming_msg_id)
+                    # Deliver media parts separately (card only carries text)
+                    await self._deliver_media_parts(
+                        parts,
+                        session_webhook,
+                        to_handle,
+                        send_meta,
+                    )
+                    return
+                # Card and both fallbacks failed; let markdown delivery retry.
+'''
+
+DONE_REACTION_ANCHOR = '''        if incoming_msg_id and conversation_id:
+            await self._send_emotion(
+                incoming_msg_id,
+                conversation_id,
+                "🤔Thinking",
+                recall=True,
+            )
+            await self._send_emotion(
+                incoming_msg_id,
+                conversation_id,
+                "🥳Done",
+            )
+        await self._complete_inflight_turn(incoming_msg_id)
+'''
+
+DONE_REACTION_REPLACEMENT = '''        if (
+            incoming_msg_id
+            and conversation_id
+            and not (state or {}).get("jarvis_visible_complete")
+        ):
+            await self._send_emotion(
+                incoming_msg_id,
+                conversation_id,
+                "🤔Thinking",
+                recall=True,
+            )
+            await self._send_emotion(
+                incoming_msg_id,
+                conversation_id,
+                "🥳Done",
+            )
+        await self._complete_inflight_turn(incoming_msg_id)
+'''
+
 CYCLE_ANCHOR = '''    async def _on_process_completed(
         self,
         request: Any,
@@ -272,6 +385,8 @@ REPLACEMENTS = (
     (CYCLE_ANCHOR, CYCLE_REPLACEMENT),
     (COMPLETE_CARD_ANCHOR, COMPLETE_CARD_REPLACEMENT),
     (UNUSED_CARD_ANCHOR, UNUSED_CARD_REPLACEMENT),
+    (COMPLETED_MESSAGE_ANCHOR, COMPLETED_MESSAGE_REPLACEMENT),
+    (DONE_REACTION_ANCHOR, DONE_REACTION_REPLACEMENT),
 )
 
 
