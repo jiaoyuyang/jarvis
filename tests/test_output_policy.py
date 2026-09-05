@@ -81,6 +81,20 @@ class OutputPolicyTest(unittest.TestCase):
             "patch_qwenpaw_dingtalk_card_finalize_guard.py",
             dockerfile,
         )
+        recovery_apply = dockerfile.index(
+            "/opt/jarvis/patches/patch_qwenpaw_dingtalk_turn_recovery.py",
+            dockerfile.index("RUN /app/venv/bin/python"),
+        )
+        finalize_apply = dockerfile.index(
+            "/opt/jarvis/patches/patch_qwenpaw_dingtalk_card_finalize_guard.py",
+            dockerfile.index("RUN /app/venv/bin/python"),
+        )
+        media_apply = dockerfile.index(
+            "/opt/jarvis/patches/patch_qwenpaw_local_artifact_delivery.py",
+            dockerfile.index("RUN /app/venv/bin/python"),
+        )
+        self.assertLess(recovery_apply, finalize_apply)
+        self.assertLess(finalize_apply, media_apply)
         self.assertIn("from qwenpaw.app.channels import renderer", dockerfile)
         self.assertIn("必须调用 `jarvis-chart`", skill)
         self.assertIn("没有图片生成工具和 matplotlib", skill)
