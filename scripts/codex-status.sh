@@ -78,7 +78,7 @@ print("turn_recovery_patch=" + ("installed" if recovery_installed else "missing"
 if not recovery_installed:
     raise SystemExit("DingTalk turn recovery patch is missing")
 card_finalize_guard_installed = (
-    "JARVIS_DINGTALK_CARD_FINALIZE_GUARD_V2" in dingtalk_source
+    "JARVIS_DINGTALK_CARD_FINALIZE_GUARD_V3" in dingtalk_source
 )
 print(
     "card_finalize_guard="
@@ -127,7 +127,10 @@ print(f"dingtalk_message_type={message_type}")
 print("dingtalk_card_template=" + ("configured" if template_configured else "missing"))
 print(f"dingtalk_card_key={dingtalk.get('card_template_key') or 'content'}")
 print("dingtalk_robot_code=" + ("configured" if robot_configured else "missing"))
-print("dingtalk_card_streaming=" + str(bool(dingtalk.get("streaming_enabled", False))).lower())
+card_streaming = bool(dingtalk.get("streaming_enabled", False))
+print("dingtalk_card_streaming=" + str(card_streaming).lower())
+inbound_delivery = "streaming_card" if card_streaming else "final_message"
+print(f"dingtalk_inbound_delivery={inbound_delivery}")
 if message_type == "card" and not (template_configured and robot_configured):
     raise SystemExit("DingTalk card mode is incomplete")
 print(f"model={settings.get('model') or 'account default'}")
