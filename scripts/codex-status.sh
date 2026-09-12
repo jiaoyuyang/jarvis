@@ -86,6 +86,15 @@ print(
 )
 if not card_finalize_guard_installed:
     raise SystemExit("DingTalk card finalize guard is missing")
+markdown_delivery_installed = (
+    "JARVIS_DINGTALK_MARKDOWN_DELIVERY_V1" in dingtalk_source
+)
+print(
+    "markdown_delivery_patch="
+    + ("installed" if markdown_delivery_installed else "missing")
+)
+if not markdown_delivery_installed:
+    raise SystemExit("DingTalk Markdown delivery patch is missing")
 renderer_source = Path(channel_renderer.__file__).read_text(encoding="utf-8")
 artifact_renderer_installed = "JARVIS_LOCAL_ARTIFACT_RENDERER_PATCH_V1" in renderer_source
 media_receipt_installed = "JARVIS_DINGTALK_MEDIA_RECEIPT_PATCH_V3" in dingtalk_source
