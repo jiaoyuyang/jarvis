@@ -59,6 +59,7 @@ grep -q '^reference_image_editing=unsupported$' "$TEMP_REPORT"
 grep -q '^deterministic_data_charts=supported$' "$TEMP_REPORT"
 grep -q '^turn_recovery_patch=installed$' "$TEMP_REPORT"
 grep -q '^card_finalize_guard=installed$' "$TEMP_REPORT"
+grep -q '^markdown_delivery_patch=installed$' "$TEMP_REPORT"
 grep -q '^health=healthy$' "$TEMP_REPORT"
 
 install -m 600 "$TEMP_REPORT" "$REPORT"
