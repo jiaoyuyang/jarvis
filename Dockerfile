@@ -25,6 +25,7 @@ COPY patches/patch_qwenpaw_capability_request_gate.py /opt/jarvis/patches/patch_
 COPY patches/patch_qwenpaw_capability_response_guard.py /opt/jarvis/patches/patch_qwenpaw_capability_response_guard.py
 COPY patches/patch_qwenpaw_dingtalk_turn_recovery.py /opt/jarvis/patches/patch_qwenpaw_dingtalk_turn_recovery.py
 COPY patches/patch_qwenpaw_dingtalk_card_finalize_guard.py /opt/jarvis/patches/patch_qwenpaw_dingtalk_card_finalize_guard.py
+COPY patches/patch_qwenpaw_dingtalk_markdown_delivery.py /opt/jarvis/patches/patch_qwenpaw_dingtalk_markdown_delivery.py
 COPY patches/patch_qwenpaw_local_artifact_delivery.py /opt/jarvis/patches/patch_qwenpaw_local_artifact_delivery.py
 COPY scripts/sync-managed-skills.py /opt/jarvis/scripts/sync-managed-skills.py
 COPY scripts/container-entrypoint.sh /opt/jarvis/scripts/container-entrypoint.sh
@@ -43,6 +44,8 @@ RUN /app/venv/bin/python \
         /opt/jarvis/patches/patch_qwenpaw_dingtalk_turn_recovery.py \
     && /app/venv/bin/python \
         /opt/jarvis/patches/patch_qwenpaw_dingtalk_card_finalize_guard.py \
+    && /app/venv/bin/python \
+        /opt/jarvis/patches/patch_qwenpaw_dingtalk_markdown_delivery.py \
     && /app/venv/bin/python \
         /opt/jarvis/patches/patch_qwenpaw_local_artifact_delivery.py \
     && /app/venv/bin/python -c \
