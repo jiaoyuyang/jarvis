@@ -29,7 +29,7 @@ HELPER_REPLACEMENT = f'''    {MARKER}
 
         value = text or ""
         pattern = re.compile(r"\\*\\*(.+?)\\*\\*", re.DOTALL)
-        safe_after = "，。；：！？、,.!?;:)]}>"
+        safe_after = "，。；：！？、,.!?;:)]}}>"
 
         def _separate(match: Any) -> str:
             next_char = value[match.end():match.end() + 1]
