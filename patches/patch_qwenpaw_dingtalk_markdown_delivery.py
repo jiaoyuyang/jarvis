@@ -4,8 +4,9 @@
 QwenPaw falls back to ``msgtype=text`` once a reply exceeds 3,500
 characters.  That exposes Markdown control characters such as ``**`` in
 DingTalk.  This patch splits long replies at paragraph/line boundaries and
-sends every part as Markdown.  If DingTalk rejects Markdown, the affected
-part is retried once as cleaned plain text.
+sends every part as Markdown.  It also normalizes strong-emphasis boundaries
+for DingTalk and balances ``**`` markers across split messages.  If DingTalk
+rejects Markdown, the affected part is retried once as cleaned plain text.
 """
 
 from __future__ import annotations
@@ -15,23 +16,61 @@ import importlib.util
 from pathlib import Path
 
 
-MARKER = "# JARVIS_DINGTALK_MARKDOWN_DELIVERY_V1"
+MARKER = "# JARVIS_DINGTALK_MARKDOWN_DELIVERY_V2"
 
 HELPER_ANCHOR = '''    async def _send_via_session_webhook(
 '''
 
 HELPER_REPLACEMENT = f'''    {MARKER}
     @staticmethod
+    def _jarvis_normalize_dingtalk_markdown(text: str) -> str:
+        """Add a safe boundary after a strong-emphasis closing marker."""
+        import re
+
+        value = text or ""
+        pattern = re.compile(r"\\*\\*(.+?)\\*\\*", re.DOTALL)
+        safe_after = "，。；：！？、,.!?;:)]}>"
+
+        def _separate(match: Any) -> str:
+            next_char = value[match.end():match.end() + 1]
+            if (
+                not next_char
+                or next_char.isspace()
+                or next_char in safe_after
+            ):
+                return match.group(0)
+            content = match.group(1).rstrip()
+            sentence_end = ("。", "！", "？", "；", ".", "!", "?", ";")
+            separator = "\\n\\n" if content.endswith(sentence_end) else " "
+            return match.group(0) + separator
+
+        return pattern.sub(_separate, value)
+
+    @staticmethod
+    def _jarvis_balance_bold_chunks(chunks: List[str]) -> List[str]:
+        """Close and reopen strong emphasis split across message chunks."""
+        balanced: List[str] = []
+        bold_open = False
+        for original in chunks:
+            marker_count = original.count("**")
+            chunk = ("**" if bold_open else "") + original
+            bold_open = bold_open != (marker_count % 2 == 1)
+            if bold_open:
+                chunk += "**"
+            balanced.append(chunk)
+        return balanced
+
     def _jarvis_split_dingtalk_markdown(
+        self,
         text: str,
-        limit: int = 3000,
+        limit: int = 2990,
     ) -> List[str]:
         """Split Markdown without breaking ordinary paragraphs or lines."""
-        value = (text or "").strip()
+        value = self._jarvis_normalize_dingtalk_markdown(text).strip()
         if not value:
             return []
         if len(value) <= limit:
-            return [value]
+            return self._jarvis_balance_bold_chunks([value])
 
         chunks: List[str] = []
         current = ""
@@ -59,7 +98,7 @@ HELPER_REPLACEMENT = f'''    {MARKER}
 
         if current:
             chunks.append(current)
-        return chunks
+        return self._jarvis_balance_bold_chunks(chunks)
 
     @staticmethod
     def _jarvis_markdown_to_plain_text(text: str) -> str:

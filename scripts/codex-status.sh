@@ -87,7 +87,7 @@ print(
 if not card_finalize_guard_installed:
     raise SystemExit("DingTalk card finalize guard is missing")
 markdown_delivery_installed = (
-    "JARVIS_DINGTALK_MARKDOWN_DELIVERY_V1" in dingtalk_source
+    "JARVIS_DINGTALK_MARKDOWN_DELIVERY_V2" in dingtalk_source
 )
 print(
     "markdown_delivery_patch="
