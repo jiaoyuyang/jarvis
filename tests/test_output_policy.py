@@ -27,13 +27,13 @@ class OutputPolicyTest(unittest.TestCase):
         self.assertIn("不使用 Mermaid、HTML", skill)
         self.assertIn("所有最终答复遵循 `jarvis-presentation`", persona)
 
-    def test_presentation_v23_is_mobile_first(self) -> None:
+    def test_presentation_v24_is_mobile_first(self) -> None:
         skill = (ROOT / "skills/jarvis-presentation/SKILL.md").read_text(
             encoding="utf-8"
         )
         persona = (ROOT / "persona/AGENTS.md").read_text(encoding="utf-8")
 
-        self.assertIn("版本：2.3", skill)
+        self.assertIn("版本：2.4", skill)
         self.assertIn("移动端优先原则", skill)
         self.assertIn("结论层", skill)
         self.assertIn("摘要层", skill)
@@ -71,7 +71,7 @@ class OutputPolicyTest(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertIn("版本：2.3", skill)
+        self.assertIn("版本：2.4", skill)
         self.assertIn("file:///app/working/weather_trend.png", skill)
         self.assertIn("图表生成失败", skill)
         self.assertIn("不得说“已直接渲染在上方”", skill)

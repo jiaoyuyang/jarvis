@@ -54,11 +54,13 @@
 - [ ] `./scripts/workflow-status.sh` 显示 `presentation_version=2`
 - [ ] `./scripts/codex-status.sh` 显示 `dingtalk_message_type=card`
 - [ ] 卡片模板、机器人编码均显示 `configured`，卡片正文变量为 `content`
+- [ ] 核对 `dingtalk_inbound_delivery`：默认 `final_message` 表示最终 Markdown 消息；只有 `streaming_card` 才走流式卡片路径，配置值 `card` 不作为原生卡片送达证据
 - [ ] 卡片只展示最终答复，不逐段展示 reasoning 或工具过程
 - [ ] 卡片发送异常时能够回退普通消息，不导致本轮无回复
 - [ ] 任务中断重启后，原处理卡片被更新为中断提示，不残留等待状态
 - [ ] 简单问题自然简洁，不机械增加四段标题和 Emoji
 - [ ] 复杂分析第一屏给出不超过两小段的核心判断
+- [ ] 默认复杂分析约 250—450 个汉字，必要依据充分；没有行动需求时不凑三项建议
 - [ ] 默认按结论、摘要、行动组织；普通答复不超过四个区块，固定四维速览外每区不超过三个要点
 - [ ] 中文栏目不附加无必要的英文翻译，不使用一级标题和整段加粗
 - [ ] 表格单元格不暴露 `**` 等 Markdown 原始标记

@@ -67,9 +67,10 @@ tmp.write_text(
     encoding="utf-8",
 )
 tmp.replace(path)
-print("dingtalk_card=enabled")
+print("dingtalk_card=configured")
 print("card_template_key=content")
 print("card_streaming=false")
+print("dingtalk_inbound_delivery=final_message")
 PY
 
 docker compose restart jarvis
@@ -78,7 +79,7 @@ for _ in $(seq 1 40); do
   health="$(docker inspect --format '{{.State.Health.Status}}' jarvis 2>/dev/null || true)"
   if [[ "$health" == "healthy" ]]; then
     echo "health=healthy"
-    echo "DingTalk AI Card is active for agent ${AGENT_ID}."
+    echo "DingTalk card configuration saved for agent ${AGENT_ID}; non-streaming inbound replies use final Markdown messages."
     exit 0
   fi
   sleep 3

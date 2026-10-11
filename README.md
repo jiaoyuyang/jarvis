@@ -85,8 +85,11 @@ ssh -L 8088:127.0.0.1:8088 ubuntu@YOUR_SERVER_IP
 ./scripts/codex-status.sh
 ```
 
-卡片模式只发送 Codex 最终答复，不启用增量流式正文。模板发送失败时 QwenPaw
-会回退普通消息；需要手工切回普通消息时执行
+该脚本保存 AI Card 模板配置，但默认关闭增量流式正文。当前 V3 收尾补丁会让
+非流式对话回复绕过预创建 AI Card，使用最终 Markdown 消息，避免卡片一直显示
+“处理中”。因此 `dingtalk_message_type=card` 仅表示配置，实际对话通道应查看
+`dingtalk_inbound_delivery=final_message`；不能据此认定原生卡片已验收。
+流式卡片收尾失败时会重试并回退普通消息；需要手工切回普通消息时执行
 `./scripts/disable-dingtalk-card.sh`。模板 ID 仅写入服务器私有 `agent.json`，
 不会进入 Git 仓库。
 

@@ -82,7 +82,7 @@ class DingTalkMarkdownDeliveryPatchTest(unittest.TestCase):
         self.assertTrue(result)
         rendered = channel.payloads[0]["markdown"]["text"]
         self.assertIn(
-            "**自己坚守的身份。**\\n\\n即使如此",
+            "**自己坚守的身份。**\n\n即使如此",
             rendered,
         )
         self.assertEqual(rendered.count("**") % 2, 0)
