@@ -8,7 +8,7 @@ from typing import Literal
 from mcp.types import ToolAnnotations
 
 HELPER = "/usr/local/sbin/jarvis-network-ops"
-VERSION = "1.1.3"
+VERSION = "1.1.4"
 
 
 def hints(read_only=False, destructive=False, idempotent=False, open_world=False):
