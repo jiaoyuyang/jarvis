@@ -135,6 +135,8 @@ class FakeRunner:
         self.calls.append(list(argv))
         if argv[:4] == ["wg", "show", "wg0", "allowed-ips"]:
             return "PEER_PUBLIC_KEY\t" + self.allowed
+        if argv[:5] == ["ip", "-4", "-j", "route", "get"]:
+            return '[{"dev":"wg0","prefsrc":"172.16.0.2"}]'
         if argv[0] == "/usr/local/bin/mihomo":
             return "configuration valid"
         if argv[0] == "systemd-run":
@@ -178,6 +180,50 @@ class NetworkTests(unittest.TestCase):
         text = json.dumps([self.e.snapshot(), self.e.probe()], ensure_ascii=False)
         for secret in ("SECRET_SENTINEL", "PASSWORD_SENTINEL", "PRIVATE_KEY_SENTINEL", "PEER_PUBLIC_KEY"):
             self.assertNotIn(secret, text)
+
+    def test_wg_permission_failure_keeps_other_snapshot_evidence(self):
+        original = self.e.runner
+        def runner(argv, **kwargs):
+            if argv[0] == "wg":
+                raise engine.HostCommandError("wg", 1, "Unable to access interface: Operation not permitted SECRET_SENTINEL")
+            return original(argv, **kwargs)
+        self.e.runner = runner
+        snapshot = self.e.snapshot()
+        self.assertEqual(snapshot['wireguard_read_error']['reason'], 'permission_denied')
+        self.assertEqual(snapshot['entry_routes']['59.125.68.205']['dev'], 'wg0')
+        self.assertIn('OpenAI专用', snapshot['groups'])
+        self.assertNotIn('SECRET_SENTINEL', json.dumps(snapshot))
+
+    def test_provider_inventory_excludes_credentials_and_outside_paths(self):
+        cache = self.root / 'primary.yaml'
+        cache.write_text('proxies:\n - {name: JP1, type: trojan, server: cn.bing.com, port: 50130, sni: static.example.com, password: PASSWORD_SENTINEL}\n')
+        self.e.config['proxy-providers'] = {'梯子猫订阅': {'path': 'primary.yaml', 'url': 'https://example.com/SECRET_SENTINEL'}}
+        result = self.e.provider_inventory('primary')
+        self.assertEqual(result['nodes'][0]['port'], 50130)
+        self.assertEqual(result['source_host'], 'example.com')
+        self.assertNotIn('SENTINEL', json.dumps(result))
+        self.e.config['proxy-providers']['梯子猫订阅']['path'] = '../outside.yaml'
+        self.assertEqual(self.e.provider_inventory('primary')['cache_error'], 'cache_path_outside_mihomo')
+
+    def test_controller_http_status_is_preserved_without_raw_response(self):
+        original = self.controller.call
+        def call(path, **kwargs):
+            if '/delay?' in path:
+                raise urllib.error.HTTPError('http://127.0.0.1/SECRET_SENTINEL', 504, 'SECRET_SENTINEL', {}, None)
+            return original(path, **kwargs)
+        self.controller.call = call
+        result = self.e.probe(limit=1)
+        self.assertEqual(result['results'][0]['tests'][0]['controller_http_status'], 504)
+        self.assertNotIn('SECRET_SENTINEL', json.dumps(result))
+
+    def test_quota_and_expiry_labels_are_not_probed_as_nodes(self):
+        original = self.controller.call
+        def call(path, **kwargs):
+            if path.startswith('/providers/proxies/'):
+                return {'proxies': [{'name': n, 'type': 'Trojan'} for n in ('JP1', '剩余流量：1 GB', '套餐到期：2099-01-01')]}
+            return original(path, **kwargs)
+        self.controller.call = call
+        self.assertEqual(self.e.probe()['total'], 1)
 
     def test_fresh_probes_ignore_cached_dead_and_require_both_checks(self):
         result = self.e.probe()

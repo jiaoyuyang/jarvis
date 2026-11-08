@@ -24,7 +24,7 @@ import uuid
 
 import yaml
 
-VERSION = "1.0.1"
+VERSION = "1.0.2"
 CONFIG = Path("/etc/mihomo/config.yaml")
 WIREGUARD = Path("/etc/wireguard/wg0.conf")
 STATE = Path("/var/lib/jarvis-ops-network")
@@ -40,6 +40,18 @@ ID = re.compile(r"[0-9a-f]{32}")
 
 class OperationError(Exception):
     """Only fixed public error codes may cross the MCP boundary."""
+
+
+class HostCommandError(OperationError):
+    def __init__(self, program, returncode, stderr=""):
+        super().__init__("host_command_failed")
+        self.details = {"error": "host_command_failed", "program": Path(program).name,
+                        "exit_code": returncode}
+        # Classify only known messages; never return raw command output/arguments.
+        if "operation not permitted" in stderr.lower() or "permission denied" in stderr.lower():
+            self.details["reason"] = "permission_denied"
+        elif "no such device" in stderr.lower() or "does not exist" in stderr.lower():
+            self.details["reason"] = "interface_not_found"
 
 
 def require(ok, code):
@@ -80,8 +92,14 @@ def atomic(path, data, mode=0o600, uid=None, gid=None):
 
 
 def command(argv, timeout=15):
-    result = subprocess.run(argv, capture_output=True, timeout=timeout, text=True)
-    require(result.returncode == 0, "host_command_failed")
+    try:
+        result = subprocess.run(argv, capture_output=True, timeout=timeout, text=True)
+    except FileNotFoundError:
+        raise HostCommandError(argv[0], 127) from None
+    except subprocess.TimeoutExpired:
+        raise HostCommandError(argv[0], 124) from None
+    if result.returncode:
+        raise HostCommandError(argv[0], result.returncode, result.stderr)
     return result.stdout.strip()
 
 
@@ -198,6 +216,59 @@ class Engine:
                      method="PUT", data={"name": node})
         require(self.selected() == selected, "selection_not_applied")
 
+    def provider_inventory(self, role):
+        """Read only the configured cache beneath the fixed Mihomo directory."""
+        config = self.config.get("proxy-providers", {}).get(PROVIDERS[role], {})
+        url = str(config.get("url") or "")
+        result = {"provider": PROVIDERS[role], "source_host": urllib.parse.urlsplit(url).hostname,
+                  "source_sha256": digest(url.encode()) if url else None, "nodes": []}
+        name = config.get("path")
+        if not isinstance(name, str) or not name:
+            result["cache_error"] = "cache_path_not_configured"
+            return result
+        root = self.config_path.parent.resolve()
+        path = Path(name) if Path(name).is_absolute() else root / name
+        if path.is_symlink() or not path.resolve().is_relative_to(root):
+            result["cache_error"] = "cache_path_outside_mihomo"
+            return result
+        try:
+            with path.open("rb") as stream:
+                raw = stream.read(1_048_577)
+            require(len(raw) <= 1_048_576, "provider_cache_too_large")
+            data = yaml.safe_load(raw) or {}
+            require(isinstance(data, dict) and isinstance(data.get("proxies", []), list), "invalid_provider_cache")
+            for node in data.get("proxies", []):
+                if not isinstance(node, dict):
+                    continue
+                host = str(node.get("server") or "")
+                sni = str(node.get("sni") or node.get("servername") or host)
+                # Never expose credentials, UUIDs, URL paths, or arbitrary YAML fields.
+                if not re.fullmatch(r"[A-Za-z0-9.:-]{1,253}", host) or not re.fullmatch(r"[A-Za-z0-9.:-]{1,253}", sni):
+                    continue
+                port = node.get("port")
+                if type(port) is not int or not 1 <= port <= 65535:
+                    continue
+                protocol = str(node.get("type") or "")
+                if not re.fullmatch(r"[a-z0-9-]{1,32}", protocol):
+                    continue
+                result["nodes"].append({"name": redact(node.get("name", "")), "type": protocol,
+                    "server": host, "port": port, "sni": sni,
+                    "skip_cert_verify": node.get("skip-cert-verify", False)})
+        except (OSError, ValueError, yaml.YAMLError, OperationError):
+            result["cache_error"] = "provider_cache_unavailable"
+        return result
+
+    def host_read_diagnostics(self):
+        result = {"effective_uid": os.geteuid()}
+        try:
+            status = dict(line.split(":", 1) for line in Path("/proc/self/status").read_text().splitlines() if ":" in line)
+            caps = int(status["CapEff"].strip(), 16)
+            result["cap_net_admin"] = bool(caps & (1 << 12))
+            result["network_namespace"] = os.readlink("/proc/self/ns/net")
+        except (OSError, KeyError, ValueError):
+            result["capabilities_error"] = "unavailable"
+        return result
+
     def snapshot(self):
         groups = {}
         for name in (*SELECTORS.values(), *FALLBACKS):
@@ -213,7 +284,18 @@ class Engine:
                     value = parsed.scheme + "://" + (parsed.hostname or "") + parsed.path
                 result.append(value)
             return result
-        wg = self.runner(["wg", "show", "wg0", "allowed-ips"])
+        wg, wg_error = "", None
+        try:
+            wg = self.runner(["wg", "show", "wg0", "allowed-ips"])
+        except HostCommandError as error:
+            wg_error = error.details
+        routes = {}
+        for address in ("202.89.233.100", "202.89.233.101", "59.125.68.205"):
+            try:
+                raw = json.loads(self.runner(["ip", "-4", "-j", "route", "get", address]))
+                routes[address] = {key: raw[0].get(key) for key in ("dev", "gateway", "prefsrc")}
+            except (OperationError, ValueError, IndexError, TypeError):
+                routes[address] = {"error": "route_read_unavailable"}
         return {"version": VERSION, "observed_at": self.clock(),
             "hostname": socket.gethostname(), "groups": groups,
             "dns": {"prefer_h3": dns.get("prefer-h3"),
@@ -222,6 +304,9 @@ class Engine:
                     "proxy_server_nameserver": public_urls(dns.get("proxy-server-nameserver"))},
             "selected_cache": self.config.get("profile", {}).get("store-selected"),
             "wireguard_allowed_ips": [line.split()[1:] for line in wg.splitlines()],
+            "wireguard_read_error": wg_error, "host_read_context": self.host_read_diagnostics(),
+            "entry_routes": routes,
+            "provider_inventory": {role: self.provider_inventory(role) for role in PROVIDERS},
             "pending_changes": self.active_change()}
 
     def probe(self, provider="primary", offset=0, limit=4, timeout_ms=4000):
@@ -232,7 +317,8 @@ class Engine:
         metadata = self.api("/providers/proxies/" + urllib.parse.quote(PROVIDERS[provider], safe=""))
         nodes = sorted({p["name"] for p in metadata.get("proxies", [])
                         if p.get("name") and p.get("type") not in (
-                            "Selector", "Fallback", "URLTest", "LoadBalance", "Direct", "Reject")})
+                            "Selector", "Fallback", "URLTest", "LoadBalance", "Direct", "Reject")
+                        and not re.match(r"^(剩余流量|套餐到期|到期时间)[：:]", p["name"])})
         cfg_hash = digest(self.config_path.read_bytes())
         def fresh(node):
             tests = []
@@ -245,8 +331,11 @@ class Engine:
                     tests.append({"url": url, "expected_http": status, "ok": ok,
                                   "delay_ms": result.get("delay") if ok else None})
                 except Exception as error:
-                    tests.append({"url": url, "expected_http": status, "ok": False,
-                                  "error": type(error).__name__})
+                    failure = {"url": url, "expected_http": status, "ok": False,
+                               "error": type(error).__name__}
+                    if isinstance(error, urllib.error.HTTPError):
+                        failure["controller_http_status"] = error.code
+                    tests.append(failure)
             receipt = {"id": uuid.uuid4().hex, "kind": "probe", "provider": provider,
                        "node": node, "observed_at": self.clock(), "config_hash": cfg_hash,
                        "tests": tests, "ok": all(t["ok"] for t in tests)}
