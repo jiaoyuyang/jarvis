@@ -50,7 +50,8 @@ print(json.dumps({'ok':True,'result':{'netlink':True,'outside_readonly':outside_
         self.installer.write_text('''import time,subprocess,os
 from pathlib import Path
 time.sleep(3)
-r=subprocess.run(['runuser','-u','nobody','--','/usr/bin/python3','-c','import os;print(os.geteuid())'],capture_output=True,text=True,check=True)
+r=subprocess.run(['runuser','-u','nobody','--','/usr/bin/python3','-c','import os;print(os.geteuid())'],capture_output=True,text=True)
+assert r.returncode==0, r.stderr
 assert r.stdout.strip()=='65534'
 p=Path(''' + repr(str(self.etc / 'async-survived')) + ''')
 p.write_text('independent')
@@ -137,7 +138,10 @@ print(json.dumps({'uid':os.geteuid(),'direct_netlink_denied':direct_netlink_deni
         deadline=time.monotonic()+10
         while not marker.exists() and time.monotonic()<deadline:
             time.sleep(0.1)
-        self.assertTrue(marker.exists(), 'upgrade died with its caller')
+        if not marker.exists():
+            unit='jarvis-ops-upgrade-'+result['result']['upgrade_id']+'.service'
+            log=subprocess.run(['journalctl','-u',unit,'-n','40','--no-pager'],capture_output=True,text=True)
+            self.fail('independent upgrade did not complete:\n'+log.stdout+log.stderr)
 
 
 if __name__ == '__main__':
