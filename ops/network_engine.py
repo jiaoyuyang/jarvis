@@ -112,12 +112,11 @@ def worker_command(unit, upgrade=False):
     """A service (never a scope) is spawned by PID 1, outside the tunnel sandbox."""
     paths = UPGRADE_PATHS if upgrade else WORKER_PATHS
     caps = "CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_NET_ADMIN"
-    if upgrade:
-        caps += " CAP_SETUID CAP_SETGID"
     properties = ("Type=exec", "User=root", "UMask=0077", "NoNewPrivileges=yes",
                   "ProtectSystem=strict", "ProtectHome=read-only", "PrivateTmp=yes",
                   "RestrictSUIDSGID=yes", "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK",
-                  "CapabilityBoundingSet=" + caps, "ReadWritePaths=" + " ".join(paths),
+                  "CapabilityBoundingSet=" + caps, "AmbientCapabilities=" + caps,
+                  "ReadWritePaths=" + " ".join(paths),
                   "RuntimeMaxSec=" + ("160s" if upgrade else "115s"))
     argv = [SYSTEMD_RUN, "--quiet", "--collect", "--unit=" + unit]
     argv += ["--property=" + value for value in properties]

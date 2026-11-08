@@ -43,14 +43,18 @@ try:
 except OSError:
     outside_readonly=True
 status=Path('/proc/self/status').read_text()
+caps=int(next(x for x in status.splitlines() if x.startswith('CapEff:')).split()[1],16)
 print(json.dumps({'ok':True,'result':{'netlink':True,'outside_readonly':outside_readonly,
-    'uid':os.geteuid(),'nnp':next(x for x in status.splitlines() if x.startswith('NoNewPrivs:')).endswith('1')}}))
+    'uid':os.geteuid(),'net_admin':bool(caps & (1<<12)),
+    'nnp':next(x for x in status.splitlines() if x.startswith('NoNewPrivs:')).endswith('1')}}))
 ''')
         self.installer = self.root / 'installer.py'
         self.installer.write_text('''import time,subprocess,os
 from pathlib import Path
 time.sleep(3)
-r=subprocess.run(['/usr/bin/python3','-c','import os;print(os.geteuid())'],user=65534,group=65534,extra_groups=[],capture_output=True,text=True)
+r=subprocess.run(['/usr/bin/systemd-run','--quiet','--pipe','--wait','--collect',
+    '--property=Type=exec','--property=User=nobody','--property=NoNewPrivileges=yes',
+    '--property=CapabilityBoundingSet=','/usr/bin/python3','-c','import os;print(os.geteuid())'],capture_output=True,text=True)
 assert r.returncode==0, r.stderr
 assert r.stdout.strip()=='65534'
 p=Path(''' + repr(str(self.etc / 'async-survived')) + ''')
@@ -127,6 +131,7 @@ print(json.dumps({'uid':os.geteuid(),'direct_netlink_denied':direct_netlink_deni
         self.assertTrue(result['result']['netlink'])
         self.assertTrue(result['result']['outside_readonly'])
         self.assertTrue(result['result']['nnp'])
+        self.assertTrue(result['result']['net_admin'])
         self.assertEqual(result['result']['uid'],0)
         self.assertEqual((self.etc/'worker-ok').read_text(),'ok')
 

@@ -567,8 +567,6 @@ class InstallerLifecycleTests(unittest.TestCase):
         patch.start(); self.addCleanup(patch.stop)
         patch = mock.patch.object(installer, "service_actor", return_value="jarvis-ops")
         patch.start(); self.addCleanup(patch.stop)
-        patch = mock.patch.object(installer, "actor_options", return_value={'user': 1001, 'group': 1001, 'extra_groups': []})
-        patch.start(); self.addCleanup(patch.stop)
         payload = {name: (ROOT / "ops" / name).read_bytes() for name in installer.FILES}
         patch = mock.patch.object(installer, "fetch_release", return_value=(payload, {"version": "test"}))
         patch.start(); self.addCleanup(patch.stop)
@@ -612,9 +610,10 @@ class InstallerLifecycleTests(unittest.TestCase):
             'cap_net_admin': True, 'no_new_privileges': True, 'cgroup': '/system.slice/jarvis-ops-task-fixture.service'}}}))
         with mock.patch.object(installer.subprocess, "run", return_value=ok) as run:
             installer.verify(result["installation_id"])
-        self.assertEqual(run.call_args.args[0][:2], ["sudo", "-n"])
-        self.assertEqual(run.call_args.kwargs['user'], 1001)
-        self.assertEqual(run.call_args.kwargs['group'], 1001)
+        argv = run.call_args.args[0]
+        self.assertIn('--property=User=jarvis-ops', argv)
+        self.assertIn('--property=NoNewPrivileges=no', argv)
+        self.assertEqual(argv[-4:], ["sudo", "-n", str(installer.WRAPPER), "snapshot"])
         _, record = installer.record(result["installation_id"])
         self.assertEqual(record["phase"], "committed")
         current = installer.SERVER.read_text()
@@ -659,6 +658,7 @@ class BrokerTests(unittest.TestCase):
         self.assertIn('--wait', argv)
         self.assertIn('--property=ProtectSystem=strict', argv)
         self.assertIn('--property=NoNewPrivileges=yes', argv)
+        self.assertIn('--property=AmbientCapabilities=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_NET_ADMIN', argv)
         self.assertIn('--property=RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK', argv)
         paths = next(x for x in argv if x.startswith('--property=ReadWritePaths='))
         self.assertNotIn('/usr', paths)

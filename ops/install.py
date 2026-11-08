@@ -43,15 +43,23 @@ def require(ok, code):
         raise RuntimeError(code)
 
 
-def actor_options(username):
-    account = pwd.getpwnam(username)
-    return {"user": account.pw_uid, "group": account.pw_gid,
-            "extra_groups": os.getgrouplist(username, account.pw_gid)}
+def actor_command(args, username, helper_access=False):
+    require(re.fullmatch(r"[a-z_][a-z0-9_-]*\$?", username), "unsupported_service_user")
+    argv = ["/usr/bin/systemd-run", "--quiet", "--pipe", "--wait", "--collect",
+            "--unit=jarvis-ops-check-" + uuid.uuid4().hex, "--property=Type=exec",
+            "--property=User=" + username, "--property=ProtectSystem=full",
+            "--property=ProtectHome=read-only", "--property=PrivateTmp=yes",
+            "--property=RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6",
+            "--property=RuntimeMaxSec=40s",
+            "--property=NoNewPrivileges=" + ("no" if helper_access else "yes")]
+    if not helper_access:
+        argv.append("--property=CapabilityBoundingSet=")
+    return argv + args
 
 
 def run(args, timeout=20, actor=None):
-    options = actor_options(actor) if actor else {}
-    result = subprocess.run(args, capture_output=True, text=True, timeout=timeout, **options)
+    argv = actor_command(args, actor) if actor else args
+    result = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
     require(result.returncode == 0, "host_preflight_failed")
     return result.stdout.strip()
 
@@ -291,8 +299,8 @@ def _verify(identity):
         argv = [str(WRAPPER), "snapshot"]
         if info["service_user"] != "root":
             argv = ["sudo", "-n", *argv]
-        result = subprocess.run(argv, input="{}", capture_output=True, text=True, timeout=35,
-                                **actor_options(info["service_user"]))
+        result = subprocess.run(actor_command(argv, info["service_user"], helper_access=True),
+                                input="{}", capture_output=True, text=True, timeout=35)
         response = json.loads(result.stdout)
         require(result.returncode == 0 and response.get("ok"), "privileged_bridge_check_failed")
         snapshot = response.get("result", {})
