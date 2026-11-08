@@ -1,13 +1,26 @@
-"""Register bounded operations on the existing FastMCP instance."""
+"""Register bounded operations on the existing v1 FastMCP or v2 MCPServer."""
 from __future__ import annotations
 
 import json
 import os
 import subprocess
 from typing import Literal
+from mcp.types import ToolAnnotations
 
 HELPER = "/usr/local/sbin/jarvis-network-ops"
-VERSION = "1.0.0"
+VERSION = "1.0.1"
+
+
+def hints(read_only=False, destructive=False, idempotent=False, open_world=False):
+    # v1 names model fields in camelCase; v2 uses snake_case. Do not rely on
+    # aliases being accepted: ignored keywords would silently discard hints.
+    fields = ToolAnnotations.model_fields
+    values = {"read_only_hint": read_only, "destructive_hint": destructive,
+              "idempotent_hint": idempotent, "open_world_hint": open_world}
+    aliases = {"read_only_hint": "readOnlyHint", "destructive_hint": "destructiveHint",
+               "idempotent_hint": "idempotentHint", "open_world_hint": "openWorldHint"}
+    return ToolAnnotations(**{key if key in fields else aliases[key]: value
+                              for key, value in values.items()})
 
 
 def invoke(action, **arguments):
@@ -29,17 +42,17 @@ def invoke(action, **arguments):
 
 
 def register_tools(mcp):
-    @mcp.tool()
+    @mcp.tool(annotations=hints(read_only=True, idempotent=True))
     def ops_extension_status() -> dict:
         """Report this extension's version; does not prove network or model health."""
         return invoke("extension-status")
 
-    @mcp.tool()
+    @mcp.tool(annotations=hints(read_only=True, idempotent=True))
     def network_snapshot() -> dict:
         """Read sanitized groups, DNS configuration, WG host routes and pending changes."""
         return invoke("snapshot")
 
-    @mcp.tool()
+    @mcp.tool(annotations=hints(read_only=True, idempotent=True, open_world=True))
     def probe_proxy_nodes(provider: Literal["primary", "backup"] = "primary",
                           offset: int = 0, limit: int = 4, timeout_ms: int = 4000) -> dict:
         """Freshly probe up to 6 provider leaves, concurrency 2, without selecting them.
@@ -49,7 +62,7 @@ def register_tools(mcp):
         """
         return invoke("probe", provider=provider, offset=offset, limit=limit, timeout_ms=timeout_ms)
 
-    @mcp.tool()
+    @mcp.tool(annotations=hints())
     def prepare_network_change(profile: Literal["switch_primary", "stabilize_dns", "persist_wireguard"],
                                primary_receipt: str = "", backup_receipt: str = "") -> dict:
         """Prepare a reviewable plan, no live traffic change.
@@ -61,7 +74,7 @@ def register_tools(mcp):
         return invoke("prepare", profile=profile, primary_receipt=primary_receipt,
                       backup_receipt=backup_receipt)
 
-    @mcp.tool()
+    @mcp.tool(annotations=hints(destructive=True))
     def apply_network_change(change_id: str) -> dict:
         """Apply an authorized prepared plan after activating an independent 120s rollback.
 
@@ -70,7 +83,7 @@ def register_tools(mcp):
         """
         return invoke("apply", change_id=change_id)
 
-    @mcp.tool()
+    @mcp.tool(annotations=hints(open_world=True))
     def confirm_network_change(change_id: str) -> dict:
         """Verify the pending change before cancelling rollback; cannot force success.
 
@@ -79,17 +92,17 @@ def register_tools(mcp):
         """
         return invoke("confirm", change_id=change_id)
 
-    @mcp.tool()
+    @mcp.tool(annotations=hints(read_only=True, idempotent=True))
     def network_change_status(change_id: str) -> dict:
         """Read an exact transaction's state; use after a timeout before retrying a write."""
         return invoke("status", change_id=change_id)
 
-    @mcp.tool()
+    @mcp.tool(annotations=hints(destructive=True, idempotent=True))
     def rollback_network_change(change_id: str) -> dict:
         """Restore a pending transaction, idempotently; committed changes are not overwritten."""
         return invoke("rollback", change_id=change_id)
 
-    @mcp.tool()
+    @mcp.tool(annotations=hints(read_only=True, idempotent=True))
     def read_application_logs(lines: int = 80) -> dict:
         """Read up to 160 recent matching application log lines, with credentials redacted.
 
@@ -98,7 +111,7 @@ def register_tools(mcp):
         """
         return invoke("logs", lines=lines)
 
-    @mcp.tool()
+    @mcp.tool(annotations=hints(open_world=True))
     def model_smoke_test() -> dict:
         """Bounded gpt-6.1-sol/high test with existing ChatGPT OAuth and fixed prompt.
 
@@ -107,7 +120,7 @@ def register_tools(mcp):
         """
         return invoke("model-smoke")
 
-    @mcp.tool()
+    @mcp.tool(annotations=hints(destructive=True, open_world=True))
     def upgrade_ops_extension(commit_sha: str, package_sha256: str) -> dict:
         """Install an authorized reviewed Ops release from jiaoyuyang/jarvis origin/main.
 
