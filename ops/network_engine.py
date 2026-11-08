@@ -24,7 +24,7 @@ import uuid
 
 import yaml
 
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 CONFIG = Path("/etc/mihomo/config.yaml")
 WIREGUARD = Path("/etc/wireguard/wg0.conf")
 STATE = Path("/var/lib/jarvis-ops-network")
@@ -41,6 +41,8 @@ FALLBACKS = ("OpenAI专用", "主备自动切换")
 TESTS = (("https://www.gstatic.com/generate_204", 204),
          ("https://api.openai.com/v1/models", 401))
 ID = re.compile(r"[0-9a-f]{32}")
+PRIMARY_DNS_RESOLVERS = ("https://custom.tizimao.net/inst", "https://custom-us.ladder-cat.com/inst")
+PRIMARY_NODE_DOMAINS = {"cn.bing.com", "tw1.apple.com", "tw2.apple.com"}
 
 
 class OperationError(Exception):
@@ -203,6 +205,36 @@ def yaml_patch(text, changes):
     return text
 
 
+def yaml_mapping_update(text, path, values):
+    """Update declared fields; insert missing fields without replacing the block."""
+    before = yaml.safe_load(text)
+    target = before
+    for key in path:
+        target = target[key]
+    require(isinstance(target, dict), "unsupported_yaml_mapping")
+    expected = copy.deepcopy(before)
+    wanted = expected
+    for key in path:
+        wanted = wanted[key]
+    wanted.update(values)
+    existing = [(path + (key,), value) for key, value in values.items() if key in target]
+    if existing:
+        text = yaml_patch(text, existing)
+    missing = {key: value for key, value in values.items() if key not in target}
+    if missing:
+        node = yaml_node(yaml.compose(text), path)
+        if node.flow_style or not node.value:
+            text = yaml_patch(text, [(path, wanted)])
+        else:
+            indent = " " * node.start_mark.column
+            addition = "".join(json.dumps(key) + ": " + json.dumps(value, ensure_ascii=False) + "\n" + indent
+                               for key, value in missing.items())
+            i = node.start_mark.index
+            text = text[:i] + addition + text[i:]
+    require(yaml.safe_load(text) == expected, "yaml_patch_scope_mismatch")
+    return text
+
+
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *args, **kwargs):
         raise OperationError("unexpected_redirect")
@@ -349,6 +381,8 @@ class Engine:
         dns = self.config.get("dns", {})
         def public_urls(values):
             result = []
+            if isinstance(values, str):
+                values = [values]
             for value in values or []:
                 value = str(value)
                 if "://" in value:
@@ -368,12 +402,21 @@ class Engine:
                 routes[address] = {key: raw[0].get(key) for key in ("dev", "gateway", "prefsrc")}
             except (OperationError, ValueError, IndexError, TypeError):
                 routes[address] = {"error": "route_read_unavailable"}
+        runtime_nodes = {}
+        for role, provider in PROVIDERS.items():
+            meta = self.api('/providers/proxies/' + urllib.parse.quote(provider, safe=''))
+            runtime_nodes[role] = sorted(p['name'] for p in meta.get('proxies', []) if p.get('name')
+                and p.get('type') not in ('Selector', 'Fallback', 'URLTest', 'Direct', 'Reject', 'LoadBalance')
+                and not re.match(r'^(剩余流量|套餐到期|到期时间)[：:]', p['name']))
         return {"version": VERSION, "observed_at": self.clock(),
             "hostname": socket.gethostname(), "groups": groups,
             "dns": {"prefer_h3": dns.get("prefer-h3"),
                     "respect_rules": dns.get("respect-rules"),
                     "fallback": public_urls(dns.get("fallback")),
                     "proxy_server_nameserver": public_urls(dns.get("proxy-server-nameserver"))},
+            "primary_node_dns_policy": {name: public_urls(dns.get('proxy-server-nameserver-policy', {}).get(name))
+                                        for name in sorted(PRIMARY_NODE_DOMAINS)},
+            "provider_runtime_nodes": runtime_nodes,
             "selected_cache": self.config.get("profile", {}).get("store-selected"),
             "wireguard_allowed_ips": [line.split()[1:] for line in wg.splitlines()],
             "wireguard_read_error": wg_error, "host_read_context": self.host_read_diagnostics(),
@@ -427,6 +470,25 @@ class Engine:
         require(item["node"] in self.group(SELECTORS[role]).get("all", []), "node_not_in_selector")
         return item
 
+    def primary_dns_template(self, url):
+        parsed = urllib.parse.urlsplit(url)
+        require(parsed.scheme == 'https' and parsed.hostname == 'web.laddercat.net'
+                and parsed.port in (None,443) and not (parsed.username or parsed.password or parsed.query or parsed.fragment)
+                and re.fullmatch(r'/subscribe/[0-9a-fA-F]{32,64}', parsed.path), 'unsupported_primary_subscription')
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({'https':'http://127.0.0.1:7890'}), NoRedirect())
+        request = urllib.request.Request(url, headers={'User-Agent':'Clash.Meta'})
+        with opener.open(request, timeout=8) as response:
+            raw = response.read(1_048_577)
+        require(len(raw) <= 1_048_576, 'subscription_too_large')
+        data = yaml.safe_load(raw)
+        require(isinstance(data,dict), 'invalid_subscription')
+        resolvers = (data.get('dns') or {}).get('proxy-server-nameserver')
+        require(isinstance(resolvers,list) and len(resolvers)==2 and set(resolvers)==set(PRIMARY_DNS_RESOLVERS),
+                'provider_dns_template_changed')
+        domains = {p.get('server') for p in data.get('proxies',[]) if isinstance(p,dict)}
+        require(PRIMARY_NODE_DOMAINS <= domains, 'provider_node_template_changed')
+        return list(PRIMARY_DNS_RESOLVERS)
+
     def prepare(self, profile, primary_receipt="", backup_receipt=""):
         require(profile in ("switch_primary", "stabilize_dns", "persist_wireguard"), "invalid_profile")
         old_text = self.config_path.read_text()
@@ -455,9 +517,22 @@ class Engine:
             dns = self.config.get("dns", {})
             require(dns.get("proxy-server-nameserver"), "missing_independent_dns_bootstrap")
             require(dns.get("respect-rules") is True, "dns_rules_not_enabled")
-            new_text = yaml_patch(old_text, [(("dns", "prefer-h3"), False),
-                (("dns", "fallback"), ["https://dns.quad9.net/dns-query#主备自动切换",
-                                          "https://dns.google/dns-query#主备自动切换"])])
+            updates = {'prefer-h3': False, 'fallback': ["https://dns.quad9.net/dns-query#主备自动切换",
+                                                       "https://dns.google/dns-query#主备自动切换"]}
+            primary = self.config.get('proxy-providers', {}).get(PROVIDERS['primary'], {})
+            url = str(primary.get('url') or '')
+            if urllib.parse.urlsplit(url).hostname == 'web.laddercat.net':
+                require(self.group(SELECTORS['backup']).get('alive') is True, 'backup_required_for_dns_bootstrap')
+                resolvers = self.primary_dns_template(url)
+                policy = copy.deepcopy(dns.get('proxy-server-nameserver-policy') or {})
+                require(isinstance(policy,dict), 'unsupported_dns_policy')
+                for name in PRIMARY_NODE_DOMAINS:
+                    policy[name] = [r + '#' + SELECTORS['backup'] for r in resolvers]
+                updates['proxy-server-nameserver-policy'] = policy
+                summary['primary_node_dns'] = {'domains': sorted(PRIMARY_NODE_DOMAINS),
+                    'resolvers': resolvers, 'via': SELECTORS['backup'], 'source_sha256': digest(url.encode()),
+                    'scope': 'node domains only; global bootstrap, credentials, SNI, routes and backup unchanged'}
+            new_text = yaml_mapping_update(old_text, ('dns',), updates)
             summary["dns_fallback"] = ["dns.quad9.net via proxy", "dns.google via proxy"]
         else:
             old_wg = self.wg_path.read_text()
@@ -504,6 +579,13 @@ class Engine:
     def reload(self):
         self.api("/configs?force=true", method="PUT", data={"path": str(self.config_path)}, timeout=20)
 
+    def flush_dns_cache(self):
+        try:
+            self.api('/cache/dns/flush', method='POST')
+            return True
+        except Exception:
+            return False
+
     def apply(self, change_id):
         with self.global_lock():
             item = self.load(change_id, "change")
@@ -533,6 +615,8 @@ class Engine:
                     self.write_existing(self.wg_path, item["new_wg"])
                 if item["new_config"] != item["old_config"]:
                     self.reload()
+                    if item['summary'].get('primary_node_dns'):
+                        require(self.flush_dns_cache(), 'dns_cache_flush_failed')
                 self.set_selected(item["new_selectors"])
             except Exception:
                 self._restore(item)
@@ -551,6 +635,8 @@ class Engine:
             self.write_existing(self.wg_path, item["old_wg"])
         if item["new_config"] != item["old_config"]:
             self.reload()
+            if item['summary'].get('primary_node_dns'):
+                self.flush_dns_cache()
         self.set_selected(item["old_selectors"])
         item["phase"] = "rolled_back"
         self.save(item)
