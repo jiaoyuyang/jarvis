@@ -22,6 +22,7 @@ import uuid
 
 REPOSITORY = "jiaoyuyang/jarvis"
 FILES = ("network_engine.py", "mcp_extension.py", "install.py")
+RUNNING_SOURCE = Path(__file__).read_bytes()
 PACKAGE = Path("/opt/jarvis-ops-network")
 STATE = Path("/var/lib/jarvis-ops-network-install")
 SERVER = Path("/opt/jarvis-ops-mcp/server.py")
@@ -29,6 +30,7 @@ VENV_PYTHON = Path("/opt/jarvis-ops-mcp/.venv/bin/python")
 SERVICE = "jarvis-ops-tunnel.service"
 WRAPPER = Path("/usr/local/sbin/jarvis-network-ops")
 SUDOERS = Path("/etc/sudoers.d/jarvis-network-ops")
+REQUESTS = Path("/var/lib/jarvis-ops-network")
 BEGIN = "# BEGIN JARVIS NETWORK OPS EXTENSION"
 END = "# END JARVIS NETWORK OPS EXTENSION"
 TOOL_NAMES = {"ops_extension_status", "network_snapshot", "probe_proxy_nodes", "prepare_network_change",
@@ -41,8 +43,23 @@ def require(ok, code):
         raise RuntimeError(code)
 
 
-def run(args, timeout=20):
-    result = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+def actor_command(args, username, helper_access=False):
+    require(re.fullmatch(r"[a-z_][a-z0-9_-]*\$?", username), "unsupported_service_user")
+    argv = ["/usr/bin/systemd-run", "--quiet", "--pipe", "--wait", "--collect",
+            "--unit=jarvis-ops-check-" + uuid.uuid4().hex, "--property=Type=exec",
+            "--property=User=" + username, "--property=ProtectSystem=full",
+            "--property=ProtectHome=read-only", "--property=PrivateTmp=yes",
+            "--property=RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6",
+            "--property=RuntimeMaxSec=40s",
+            "--property=NoNewPrivileges=" + ("no" if helper_access else "yes")]
+    if not helper_access:
+        argv.append("--property=CapabilityBoundingSet=")
+    return argv + args
+
+
+def run(args, timeout=20, actor=None):
+    argv = actor_command(args, actor) if actor else args
+    result = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
     require(result.returncode == 0, "host_preflight_failed")
     return result.stdout.strip()
 
@@ -232,6 +249,21 @@ def transaction_lock(identity):
     return stream
 
 
+def update_request(request_id, phase, installation_id=None, error=None):
+    if not request_id:
+        return
+    require(re.fullmatch(r"[0-9a-f]{32}", request_id), "invalid_request_id")
+    path = REQUESTS / ("upgrade-" + request_id + ".json")
+    require(path.is_file() and not path.is_symlink() and path.stat().st_uid == 0, "unknown_upgrade_request")
+    data = json.loads(path.read_text())
+    data.update(phase=phase, updated_at=time.time())
+    if installation_id:
+        data["installation_id"] = installation_id
+    if error:
+        data["error"] = error
+    atomic(path, json.dumps(data).encode())
+
+
 def restore(identity):
     with transaction_lock(identity):
         return _restore(identity)
@@ -249,6 +281,7 @@ def _restore(identity):
             path.unlink()
     info["phase"] = "rolled_back"
     atomic(folder / "state.json", json.dumps(info).encode())
+    update_request(info.get("request_id"), "rolled_back", identity)
     run(["systemctl", "restart", SERVICE], timeout=30)
 
 
@@ -265,29 +298,56 @@ def _verify(identity):
         # Execute the bridge as the actual service account, not merely as root.
         argv = [str(WRAPPER), "snapshot"]
         if info["service_user"] != "root":
-            argv = ["runuser", "-u", info["service_user"], "--", "sudo", "-n", *argv]
-        result = subprocess.run(argv, input="{}", capture_output=True, text=True, timeout=35)
-        require(result.returncode == 0 and json.loads(result.stdout).get("ok"), "privileged_bridge_check_failed")
+            argv = ["sudo", "-n", *argv]
+        result = subprocess.run(actor_command(argv, info["service_user"], helper_access=True),
+                                input="{}", capture_output=True, text=True, timeout=35)
+        response = json.loads(result.stdout)
+        require(result.returncode == 0 and response.get("ok"), "privileged_bridge_check_failed")
+        snapshot = response.get("result", {})
+        context = snapshot.get("host_read_context", {})
+        require(snapshot.get("wireguard_read_error") is None and context.get("cap_net_admin") is True
+                and context.get("no_new_privileges") is True
+                and "/jarvis-ops-task-" in context.get("cgroup", ""), "independent_worker_check_failed")
         require(run(["systemctl", "is-active", SERVICE]) == "active", "ops_service_not_active")
         info["phase"] = "committed"
         atomic(folder / "state.json", json.dumps(info).encode())
+        update_request(info.get("request_id"), "committed", identity)
         run(["systemctl", "stop", info["guard"] + ".timer"])
     except Exception:
         _restore(identity)
         raise
 
 
-def install(commit, expected, upgrade=False):
+def install(commit, expected, upgrade=False, request_id=None):
     require(os.geteuid() == 0, "run_installer_as_root")
     STATE.mkdir(parents=True, exist_ok=True, mode=0o700)
     require(not STATE.is_symlink() and STATE.stat().st_uid == 0, "unsafe_install_state")
     os.chmod(STATE, 0o700)
     with (STATE / "install.lock").open("a+") as install_lock:
         fcntl.flock(install_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        return _install_locked(commit, expected, upgrade)
+        pending = [p for p in STATE.glob("*/state.json") if json.loads(p.read_text()).get("phase") == "pending"]
+        release = fetch_release(commit, expected) if upgrade else None
+        actor = None
+        if pending:
+            require(upgrade and len(pending) == 1, "another_install_pending")
+            info = json.loads(pending[0].read_text())
+            require(info.get("commit") == commit and info.get("package_sha256") == expected
+                    and 0 <= time.time() - pending[0].parent.stat().st_mtime < 175,
+                    "pending_install_does_not_match_requested_release")
+            # The old bootstrap can stage /opt payloads before its inherited /usr
+            # mount becomes read-only. Resume only an exact published, root-owned
+            # payload; restore its baseline first, in this independent service.
+            for name, content in release[0].items():
+                path = PACKAGE / name
+                require(path.is_file() and not path.is_symlink() and path.stat().st_uid == 0
+                        and not (path.stat().st_mode & 0o022) and path.read_bytes() == content,
+                        "staged_release_drift_no_resume")
+            actor = info["service_user"]
+            restore(info["id"])
+        return _install_locked(commit, expected, upgrade, request_id, release, actor)
 
 
-def _install_locked(commit, expected, upgrade=False):
+def _install_locked(commit, expected, upgrade=False, request_id=None, release=None, actor=None):
     for existing in STATE.glob("*/state.json"):
         require(json.loads(existing.read_text()).get("phase") != "pending", "another_install_pending")
     if PACKAGE.exists():
@@ -297,10 +357,10 @@ def _install_locked(commit, expected, upgrade=False):
             "existing_ops_server_not_found_no_changes_made")
     source = SERVER.read_text()
     patched, mcp_name = server_patch(source)
-    user = service_actor()
+    user = actor or service_actor()
     require(re.fullmatch(r"[a-z_][a-z0-9_-]*\$?", user), "unsupported_service_user")
     run(["/usr/bin/python3", "-c", "import yaml"])
-    payload, release = fetch_release(commit, expected)
+    payload, release = release or fetch_release(commit, expected)
     identity = uuid.uuid4().hex
     folder = STATE / identity
     folder.mkdir(mode=0o700)
@@ -318,10 +378,11 @@ def _install_locked(commit, expected, upgrade=False):
         entries.append(item)
     # Save this installer independently so rollback cannot be broken by its own upgrade.
     rollback_program = folder / "installer.py"
-    atomic(rollback_program, Path(__file__).read_bytes(), 0o700)
+    atomic(rollback_program, RUNNING_SOURCE, 0o700)
     guard = "jarvis-ops-install-guard-" + identity
     info = {"id": identity, "phase": "pending", "files": entries, "guard": guard,
-            "service_user": user, "commit": commit, "package_sha256": expected}
+            "service_user": user, "commit": commit, "package_sha256": expected,
+            "request_id": request_id}
     atomic(folder / "state.json", json.dumps(info).encode())
     run(["systemd-run", "--quiet", "--unit=" + guard, "--on-active=180s",
          "--timer-property=AccuracySec=1s", "--property=RuntimeMaxSec=60s",
@@ -333,7 +394,7 @@ def _install_locked(commit, expected, upgrade=False):
         for name, content in payload.items():
             atomic(PACKAGE / name, content, 0o644)
         atomic(PACKAGE / "release.json", json.dumps(release).encode(), 0o644)
-        atomic(WRAPPER, b'#!/bin/sh\nexec /usr/bin/python3 -I /opt/jarvis-ops-network/network_engine.py "$@"\n', 0o755)
+        atomic(WRAPPER, b'#!/bin/sh\nexec /usr/bin/python3 -I /opt/jarvis-ops-network/network_engine.py --broker "$@"\n', 0o755)
         if user != "root":
             sudo = f"{user} ALL=(root) NOPASSWD: {WRAPPER}\n"
             candidate = folder / "sudoers"
@@ -348,9 +409,7 @@ def _install_locked(commit, expected, upgrade=False):
         # Public SDK registry inspection verifies original and new tools can coexist.
         test = registry_check_program(SERVER, mcp_name, TOOL_NAMES | registered_names(source, mcp_name))
         test_argv = [str(VENV_PYTHON), "-c", test]
-        if user != "root":
-            test_argv = ["runuser", "-u", user, "--", *test_argv]
-        run(test_argv, timeout=25)
+        run(test_argv, timeout=25, actor=user)
         # Return the tool result before the transport is restarted.
         reload_unit = "jarvis-ops-reload-" + identity
         run(["systemd-run", "--quiet", "--unit=" + reload_unit, "--on-active=3s",
@@ -360,6 +419,7 @@ def _install_locked(commit, expected, upgrade=False):
     except Exception:
         restore(identity)
         raise
+    update_request(request_id, "pending_local_verification", identity)
     return {"installation_id": identity, "phase": "pending_local_verification",
             "guard_seconds": 180, "version": release["version"], "commit": commit,
             "client_tool_discovery": "refresh connection and verify new tool schemas",
@@ -373,6 +433,7 @@ def main():
     parser.add_argument("--upgrade", action="store_true")
     parser.add_argument("--restore")
     parser.add_argument("--verify")
+    parser.add_argument("--request-id")
     args = parser.parse_args()
     require(os.geteuid() == 0, "run_installer_as_root")
     if args.restore:
@@ -382,7 +443,12 @@ def main():
         verify(args.verify)
         folder, info = record(args.verify)
         return {"phase": info["phase"]}
-    return install(args.commit or "", args.package_sha256 or "", args.upgrade)
+    try:
+        return install(args.commit or "", args.package_sha256 or "", args.upgrade, args.request_id)
+    except Exception as error:
+        code = str(error) if type(error) is RuntimeError else type(error).__name__
+        update_request(args.request_id, "failed", error=code)
+        raise
 
 
 if __name__ == "__main__":

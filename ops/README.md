@@ -1,5 +1,34 @@
 # Jarvis Ubuntu Ops 网络扩展
 
+## 1.1 执行隔离与旧版迁移
+
+当隧道具有文件系统或地址族隔离时，sudo 改变 UID
+不能移除继承的限制。因此 root helper 现在只接受固定动作与
+JSON 参数，并通过 PID 1 创建独立 **service**（不是继承调用环境的 scope）。
+不修改隧道现有 unit、drop-in 或旧工具的 sudo 规则。
+
+- 普通 worker：`NoNewPrivileges=yes`、`ProtectSystem=strict`、私有临时目录，
+  写目录仅网络状态、Mihomo 与 WireGuard 配置；地址族包含 AF_NETLINK。
+  仅保留 CHOWN、DAC_OVERRIDE、FOWNER、NET_ADMIN 四项能力。
+- 升级 worker：独立异步任务，另允许固定安装目录、固定 helper/sudoers 目录与
+  安装事务目录写入。验证账号由 PID 1 创建单独进程，worker 不保留 SETUID/SETGID。
+  不等待自身隧道重启；返回 `queued` 后必须查安装与升级回执，不能当作部署成功。
+- 版本仍是三个固定文件、固定 GitHub 仓库/current main 与包哈希校验。
+  helper 不接受命令、服务名、路径、URL、systemd 属性或 shell。
+
+从 1.0.1 迁移时，旧入口可能已把已校验 payload 写入 `/opt`，随后因 `/usr`
+只读而退出。180 秒独立恢复仍有效。新代码兼容旧 wrapper 的固定调用格式；在
+该保护窗口内，同一已审查发布的升级请求可以由新 broker 排入独立任务。
+安装器仅恢复 **同 commit、同包哈希、175 秒以内且全部 staged 文件仍为 root
+所有、不可组/其他用户写、内容与发布逐字一致** 的旧事务，再从原基线重新安装。
+不同发布、过期或漂移都拒绝恢复并交给原 guard；不会直接把半安装标为成功。
+回滚与验证保存的是正在执行的安装器源码，恢复旧磁盘文件不会替换其后续逻辑。
+
+CI 在一次性 VM 上以 nobody 复现只读系统目录和禁用 NETLINK 的调用环境，检查
+sudo 固定入口、worker 的 NETLINK、只允许目标目录写入、异步任务在调用单元退出
+后存活，以及升级环境中的独立账号验证和文件属主保留。验证账号由 PID 1 设置，
+不依赖 worker 内部的 UID 切换或 PAM 登录会话。该集成测试不可在生产机执行。
+
 在原来的 Ops MCP 服务上增加 11 个专用工具。保留原有工具、认证、隧道和
 Jarvis 容器边界，不开放任意 Shell、任意 URL、原始 YAML 写入或任意文件路径。
 
