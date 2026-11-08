@@ -580,6 +580,7 @@ class InstallerLifecycleTests(unittest.TestCase):
         checks = [c for c in self.calls if "-c" in c and "ops_check" in c[-1]]
         self.assertEqual(checks[0][:4], ["runuser", "-u", "jarvis-ops", "--"])
         self.assertIn("python3 -I", installer.WRAPPER.read_text())
+        self.assertIn('--broker "$@"', installer.WRAPPER.read_text())
 
     def test_install_guard_is_armed_before_source_is_replaced(self):
         original = installer.atomic
@@ -603,7 +604,8 @@ class InstallerLifecycleTests(unittest.TestCase):
 
     def test_verified_install_commits_and_guard_becomes_noop(self):
         result = self.install()
-        ok = mock.Mock(returncode=0, stdout='{"ok":true}')
+        ok = mock.Mock(returncode=0, stdout=json.dumps({'ok': True, 'result': {'host_read_context': {
+            'cap_net_admin': True, 'no_new_privileges': True, 'cgroup': '/system.slice/jarvis-ops-task-fixture.service'}}}))
         with mock.patch.object(installer.subprocess, "run", return_value=ok) as run:
             installer.verify(result["installation_id"])
         self.assertEqual(run.call_args.args[0][:5], ["runuser", "-u", "jarvis-ops", "--", "sudo"])
@@ -617,6 +619,75 @@ class InstallerLifecycleTests(unittest.TestCase):
         self.install()
         with self.assertRaisesRegex(RuntimeError, "another_install_pending"):
             self.install()
+
+    def test_same_release_resume_restores_baseline_before_fresh_install(self):
+        first = self.install()
+        payload = {name: (ROOT / 'ops' / name).read_bytes() for name in installer.FILES}
+        # The real installer requires root-owned staged files; this unit fixture
+        # bypasses only that ownership bit and still checks byte identity/drift.
+        real_require = installer.require
+        def fixture_require(ok, code):
+            if code == 'staged_release_drift_no_resume':
+                for name, content in payload.items():
+                    self.assertEqual((installer.PACKAGE / name).read_bytes(), content)
+                return
+            real_require(ok, code)
+        with mock.patch.object(installer, 'require', side_effect=fixture_require):
+            second = installer.install('f' * 40, 'a' * 64, upgrade=True)
+        self.assertNotEqual(first['installation_id'], second['installation_id'])
+        self.assertEqual(installer.record(first['installation_id'])[1]['phase'], 'rolled_back')
+        saved = installer.STATE / second['installation_id'] / 'installer.py'
+        self.assertEqual(saved.read_bytes(), installer.RUNNING_SOURCE)
+
+    def test_different_release_cannot_resume_a_pending_install(self):
+        self.install()
+        with self.assertRaisesRegex(RuntimeError, 'pending_install_does_not_match'):
+            installer.install('e' * 40, 'a' * 64, upgrade=True)
+
+
+class BrokerTests(unittest.TestCase):
+    def test_normal_worker_is_separate_and_has_bounded_permissions(self):
+        argv = engine.worker_command('jarvis-ops-task-fixture')
+        self.assertNotIn('--scope', argv)
+        self.assertIn('--pipe', argv)
+        self.assertIn('--wait', argv)
+        self.assertIn('--property=ProtectSystem=strict', argv)
+        self.assertIn('--property=NoNewPrivileges=yes', argv)
+        self.assertIn('--property=RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK', argv)
+        paths = next(x for x in argv if x.startswith('--property=ReadWritePaths='))
+        self.assertNotIn('/usr', paths)
+        self.assertNotIn('/home', paths)
+
+    def test_worker_error_remains_structured_without_raw_systemd_stderr(self):
+        response = mock.Mock(returncode=1, stdout='{"ok":false,"error":"fixed_error"}', stderr='SECRET_SENTINEL')
+        with mock.patch.object(engine.os, 'geteuid', return_value=0), mock.patch.object(engine.subprocess, 'run', return_value=response) as run:
+            result = engine.broker(['snapshot'], b'{}')
+        self.assertEqual(result, {'ok': False, 'error': 'fixed_error'})
+        self.assertEqual(run.call_args.args[0][-2:], ['--worker', 'snapshot'])
+
+    def test_unknown_commands_paths_and_bad_digests_never_launch(self):
+        with mock.patch.object(engine.os, 'geteuid', return_value=0), mock.patch.object(engine.subprocess, 'run') as run:
+            for args, raw in ((['bash'], b'{}'), (['snapshot', '/etc/passwd'], b'{}'),
+                              (['--worker', 'snapshot'], b'{}'), (['upgrade'], b'{"commit_sha":"main","package_sha256":"bad"}')):
+                with self.subTest(args=args), self.assertRaises(engine.OperationError):
+                    engine.broker(args, raw)
+        run.assert_not_called()
+
+    def test_upgrade_returns_queue_receipt_and_does_not_wait_for_its_own_restart(self):
+        with tempfile.TemporaryDirectory() as directory:
+            real_require = engine.require
+            def fixture_require(ok, code):
+                if code != 'unsafe_state_directory': real_require(ok, code)
+            with mock.patch.object(engine, 'STATE', Path(directory)), mock.patch.object(engine, 'require', side_effect=fixture_require), \
+                    mock.patch.object(engine.os, 'geteuid', return_value=0), mock.patch.object(engine, 'command', return_value='') as command:
+                result = engine.broker(['upgrade'], json.dumps({'commit_sha': 'f'*40, 'package_sha256': 'a'*64}).encode())
+            self.assertEqual(result['phase'], 'queued')
+            self.assertTrue(result['independent_service'])
+            argv = command.call_args.args[0]
+            self.assertNotIn('--pipe', argv)
+            self.assertNotIn('--wait', argv)
+            self.assertIn('--request-id', argv)
+            self.assertTrue((Path(directory)/('upgrade-'+result['upgrade_id']+'.json')).is_file())
 
 
 class ExtensionTests(unittest.TestCase):

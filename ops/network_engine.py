@@ -24,12 +24,17 @@ import uuid
 
 import yaml
 
-VERSION = "1.0.2"
+VERSION = "1.1.0"
 CONFIG = Path("/etc/mihomo/config.yaml")
 WIREGUARD = Path("/etc/wireguard/wg0.conf")
 STATE = Path("/var/lib/jarvis-ops-network")
 HELPER = "/usr/local/sbin/jarvis-network-ops"
 INSTALLER = "/opt/jarvis-ops-network/install.py"
+ENGINE = "/opt/jarvis-ops-network/network_engine.py"
+SYSTEMD_RUN = "/usr/bin/systemd-run"
+WORKER_PATHS = (str(STATE), "/etc/mihomo", "/etc/wireguard")
+UPGRADE_PATHS = (str(STATE), "/var/lib/jarvis-ops-network-install", "/opt/jarvis-ops-network",
+                 "/opt/jarvis-ops-mcp", "/usr/local/sbin", "/etc/sudoers.d")
 PROVIDERS = {"primary": "梯子猫订阅", "backup": "一元机场"}
 SELECTORS = {"primary": "梯子猫", "backup": "一元日本01专线"}
 FALLBACKS = ("OpenAI专用", "主备自动切换")
@@ -101,6 +106,72 @@ def command(argv, timeout=15):
     if result.returncode:
         raise HostCommandError(argv[0], result.returncode, result.stderr)
     return result.stdout.strip()
+
+
+def worker_command(unit, upgrade=False):
+    """A service (never a scope) is spawned by PID 1, outside the tunnel sandbox."""
+    paths = UPGRADE_PATHS if upgrade else WORKER_PATHS
+    caps = "CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_NET_ADMIN"
+    if upgrade:
+        caps += " CAP_SETUID CAP_SETGID CAP_SYS_RESOURCE"
+    properties = ("Type=exec", "User=root", "UMask=0077", "NoNewPrivileges=yes",
+                  "ProtectSystem=strict", "ProtectHome=read-only", "PrivateTmp=yes",
+                  "RestrictSUIDSGID=yes", "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK",
+                  "CapabilityBoundingSet=" + caps, "ReadWritePaths=" + " ".join(paths),
+                  "RuntimeMaxSec=" + ("160s" if upgrade else "115s"))
+    argv = [SYSTEMD_RUN, "--quiet", "--collect", "--unit=" + unit]
+    argv += ["--property=" + value for value in properties]
+    if not upgrade:
+        argv += ["--pipe", "--wait"]
+    return argv
+
+
+def broker(args, raw):
+    require(os.geteuid() == 0, "root_helper_required")
+    require(1 <= len(args) <= 2 and len(raw) <= 65536, "invalid_command")
+    action = args[0]
+    allowed = {"snapshot", "probe", "prepare", "apply", "confirm", "rollback", "status", "logs",
+               "model-smoke", "extension-status", "upgrade", "rollback-auto"}
+    require(action in allowed, "unsupported_operation")
+    data = json.loads(raw or b"{}")
+    require(isinstance(data, dict), "invalid_request")
+    if action == "rollback-auto":
+        require(len(args) == 2 and ID.fullmatch(args[1]) and not data, "invalid_command")
+    else:
+        require(len(args) == 1, "invalid_command")
+    identity = uuid.uuid4().hex
+    if action == "upgrade":
+        require(set(data) == {"commit_sha", "package_sha256"}, "invalid_upgrade_request")
+        require(isinstance(data["commit_sha"], str) and re.fullmatch(r"[0-9a-f]{40}", data["commit_sha"])
+                and isinstance(data["package_sha256"], str) and re.fullmatch(r"[0-9a-f]{64}", data["package_sha256"]),
+                "invalid_upgrade_digest")
+        STATE.mkdir(mode=0o700, parents=True, exist_ok=True)
+        require(not STATE.is_symlink() and STATE.stat().st_uid == 0, "unsafe_state_directory")
+        os.chmod(STATE, 0o700)
+        record = {"id": identity, "kind": "upgrade", "phase": "queued", "created_at": time.time(), **data}
+        path = STATE / ("upgrade-" + identity + ".json")
+        atomic(path, json.dumps(record).encode())
+        argv = worker_command("jarvis-ops-upgrade-" + identity, upgrade=True)
+        argv += ["/usr/bin/python3", "-I", INSTALLER, "--commit", data["commit_sha"],
+                 "--package-sha256", data["package_sha256"], "--upgrade", "--request-id", identity]
+        try:
+            command(argv, timeout=15)
+        except Exception:
+            record["phase"] = "launch_failed"
+            atomic(path, json.dumps(record).encode())
+            raise
+        return {"upgrade_id": identity, "phase": "queued", "independent_service": True,
+                "check": "ops_extension_status; queued is not installed or committed"}
+    argv = worker_command("jarvis-ops-task-" + identity)
+    argv += ["/usr/bin/python3", "-I", ENGINE, "--worker", *args]
+    result = subprocess.run(argv, input=raw.decode(), capture_output=True, text=True, timeout=120)
+    try:
+        response = json.loads(result.stdout)
+    except ValueError:
+        raise OperationError("independent_worker_unavailable") from None
+    require(isinstance(response, dict) and isinstance(response.get("ok"), bool), "invalid_worker_result")
+    # Preserve the worker's fixed error, not systemd's raw stderr or argv.
+    return response
 
 
 def yaml_node(node, path):
@@ -264,7 +335,9 @@ class Engine:
             status = dict(line.split(":", 1) for line in Path("/proc/self/status").read_text().splitlines() if ":" in line)
             caps = int(status["CapEff"].strip(), 16)
             result["cap_net_admin"] = bool(caps & (1 << 12))
+            result["no_new_privileges"] = status.get("NoNewPrivs", "0").strip() == "1"
             result["network_namespace"] = os.readlink("/proc/self/ns/net")
+            result["cgroup"] = Path("/proc/self/cgroup").read_text().splitlines()[-1].split(":", 2)[-1]
         except (OSError, KeyError, ValueError):
             result["capabilities_error"] = "unavailable"
         return result
@@ -540,8 +613,12 @@ class Engine:
         records = list(folder.glob("*/state.json"))
         latest = max(records, key=lambda p: p.stat().st_mtime) if records else None
         install = json.loads(latest.read_text()) if latest else {}
+        upgrades = list(self.state.glob("upgrade-*.json"))
+        upgrade = json.loads(max(upgrades, key=lambda p: p.stat().st_mtime).read_text()) if upgrades else None
         return {"version": VERSION, "arbitrary_shell": False, "rollback_seconds": 120,
-                "installation": {key: install.get(key) for key in ("id", "phase", "commit", "package_sha256")}}
+                "execution": "independent_systemd_service",
+                "upgrade_request": upgrade,
+                "installation": {key: install.get(key) for key in ("id", "phase", "commit", "package_sha256", "request_id")}}
 
     def application_logs(self, lines=80):
         bounded_int(lines, 1, 160)
@@ -595,7 +672,7 @@ def redact(text):
     return text
 
 
-def main():
+def worker_main():
     require(os.geteuid() == 0, "root_helper_required")
     require(len(sys.argv) in (2, 3), "invalid_command")
     engine = Engine()
@@ -612,20 +689,22 @@ def main():
                "apply": engine.apply, "confirm": engine.confirm, "rollback": engine.rollback,
                "status": engine.status, "logs": engine.application_logs, "model-smoke": engine.model_smoke,
                "extension-status": engine.extension_status}
-    if action == "upgrade":
-        require(set(data) == {"commit_sha", "package_sha256"}, "invalid_upgrade_request")
-        require(re.fullmatch(r"[0-9a-f]{40}", data["commit_sha"]) and
-                re.fullmatch(r"[0-9a-f]{64}", data["package_sha256"]), "invalid_upgrade_digest")
-        # The installer independently verifies origin/main and every pinned file hash.
-        return json.loads(command(["/usr/bin/python3", "-I", INSTALLER, "--commit", data["commit_sha"],
-            "--package-sha256", data["package_sha256"], "--upgrade"], timeout=100))
     require(action in methods, "unsupported_operation")
     return methods[action](**data)
 
 
 if __name__ == "__main__":
     try:
-        print(json.dumps({"ok": True, "result": main()}, ensure_ascii=False))
+        if len(sys.argv) > 1 and sys.argv[1] == "--worker":
+            del sys.argv[1]
+            response = {"ok": True, "result": worker_main()}
+        else:
+            args = sys.argv[2:] if len(sys.argv) > 1 and sys.argv[1] == "--broker" else sys.argv[1:]
+            result = broker(args, sys.stdin.buffer.read(65537))
+            response = result if "ok" in result else {"ok": True, "result": result}
+        print(json.dumps(response, ensure_ascii=False))
+        if not response.get("ok"):
+            sys.exit(1)
     except Exception as error:
         code = str(error) if isinstance(error, OperationError) else type(error).__name__
         print(json.dumps({"ok": False, "error": code}))
