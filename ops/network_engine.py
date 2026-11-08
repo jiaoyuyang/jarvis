@@ -10,6 +10,7 @@ import hashlib
 import ipaddress
 import json
 import os
+import pwd
 from pathlib import Path
 import re
 import socket
@@ -24,7 +25,7 @@ import uuid
 
 import yaml
 
-VERSION = "1.1.4"
+VERSION = "1.1.5"
 CONFIG = Path("/etc/mihomo/config.yaml")
 WIREGUARD = Path("/etc/wireguard/wg0.conf")
 STATE = Path("/var/lib/jarvis-ops-network")
@@ -400,6 +401,21 @@ class Engine:
             result["capabilities_error"] = "unavailable"
         return result
 
+    def management_identity(self):
+        # Fixed service/account only. Never read argv, environment, or credentials.
+        raw = self.runner(['systemctl', 'show', 'jarvis-ops-tunnel.service',
+                           '--property=User', '--property=MainPID'])
+        fields = dict(line.split('=', 1) for line in raw.splitlines() if '=' in line)
+        require(fields.get('User') == 'jarvisops', 'unsupported_management_account')
+        pid = fields.get('MainPID', '')
+        require(pid.isdecimal() and int(pid) > 0, 'management_process_unavailable')
+        uid = pwd.getpwnam('jarvisops').pw_uid
+        require(uid > 0, 'unsupported_management_uid')
+        status = Path('/proc/' + pid + '/status').read_text()
+        match = re.search(r'(?m)^Uid:\s+(\d+)\s+(\d+)', status)
+        require(match and int(match[1]) == uid and int(match[2]) == uid, 'management_uid_mismatch')
+        return {'user': 'jarvisops', 'uid': uid}
+
     def snapshot(self):
         groups = {}
         for name in (*SELECTORS.values(), *FALLBACKS):
@@ -435,8 +451,15 @@ class Engine:
             runtime_nodes[role] = sorted(p['name'] for p in meta.get('proxies', []) if p.get('name')
                 and p.get('type') not in ('Selector', 'Fallback', 'URLTest', 'Direct', 'Reject', 'LoadBalance')
                 and not re.match(r'^(剩余流量|套餐到期|到期时间)[：:]', p['name']))
+        try:
+            management = self.management_identity()
+            rule = 'UID,' + str(management['uid']) + ',' + SELECTORS['backup']
+            management['rule_first'] = (self.config.get('rules') or [None])[0] == rule
+            management['process_mode'] = self.config.get('find-process-mode', 'strict')
+        except (OperationError, OSError, KeyError):
+            management = {'error': 'management_identity_unavailable'}
         return {"version": VERSION, "observed_at": self.clock(),
-            "hostname": socket.gethostname(), "groups": groups,
+            "hostname": socket.gethostname(), "groups": groups, "management_route": management,
             "dns": {"prefer_h3": dns.get("prefer-h3"),
                     "respect_rules": dns.get("respect-rules"),
                     "fallback": public_urls(dns.get("fallback")),
@@ -571,12 +594,28 @@ class Engine:
                 target['primary'] = candidates[0]
                 summary['target_selectors'] = target.copy()
                 summary['selector_scope'] = 'Pin the primary candidate; fallback remains automatic and transport verification is required.'
+                identity = self.management_identity()
+                rules = self.config.get('rules', [])
+                require(isinstance(rules, list) and all(isinstance(r, str) for r in rules),
+                        'unsupported_routing_rules')
+                management_rule = 'UID,' + str(identity['uid']) + ',' + SELECTORS['backup']
+                summary['management_route'] = {**identity, 'via': SELECTORS['backup'],
+                    'rule': management_rule, 'scope': 'Dedicated Ops account only; Jarvis business rules unchanged.'}
                 summary['primary_node_dns'] = {'domains': sorted(PRIMARY_NODE_DOMAINS),
                     'resolvers': resolvers, 'via': SELECTORS['backup'], 'source_sha256': digest(url.encode()),
                     'scope': 'node domains only; global bootstrap, credentials, SNI, routes and backup unchanged'}
             new_text, normalized = dns_candidate(old_text, updates)
+            if summary.get('management_route'):
+                expected = yaml.safe_load(new_text)
+                expected['rules'] = [management_rule] + [r for r in rules if r != management_rule]
+                expected['find-process-mode'] = 'strict'
+                new_text = yaml.safe_dump(expected, allow_unicode=True, sort_keys=False)
+                require(yaml.safe_load(new_text) == expected, 'management_route_scope_mismatch')
+                normalized = True
             summary['yaml_layout_normalized'] = normalized
-            summary['semantic_scope'] = 'Only the declared DNS fields change; all other values must match exactly.'
+            summary['semantic_scope'] = ('Declared DNS fields plus the dedicated Ops UID rule and process matching; '
+                'all other configuration values must match exactly.' if summary.get('management_route') else
+                'Only the declared DNS fields change; all other values must match exactly.')
             summary["dns_fallback"] = ["dns.quad9.net via proxy", "dns.google via proxy"]
         else:
             old_wg = self.wg_path.read_text()
@@ -638,6 +677,10 @@ class Engine:
             require(not self.active_change(), "another_change_pending")
             require(self.config_path.read_text() == item["old_config"], "configuration_drift")
             require(self.selected() == item["old_selectors"], "selector_drift")
+            if item['summary'].get('management_route'):
+                actual = self.management_identity()
+                require(all(actual[k] == item['summary']['management_route'][k] for k in ('user', 'uid')),
+                        'management_identity_drift')
             if item["profile"] == "switch_primary":
                 for role, identity in item["receipts"].items():
                     self.fresh_receipt(identity, role)
@@ -709,6 +752,10 @@ class Engine:
         # Network I/O happens outside the lock so the guard can always acquire it.
         item = self.load(change_id, "change")
         require(item["phase"] == "pending", "change_not_pending")
+        if item['summary'].get('management_route'):
+            actual = self.management_identity()
+            require(all(actual[k] == item['summary']['management_route'][k] for k in ('user', 'uid')),
+                    'management_identity_drift')
         if item["profile"] == "persist_wireguard":
             runtime = self.runner(["wg", "show", "wg0", "allowed-ips"]).splitlines()
             require(len(runtime) == 1 and set(runtime[0].split()[1:]) == set(item["summary"]["allowed_ips"]),
