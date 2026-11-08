@@ -79,19 +79,42 @@ def server_patch(source):
                     explicit = [k.value.value for k in decorator.keywords if k.arg == "name" and isinstance(k.value, ast.Constant)]
                     require((explicit[0] if explicit else node.name) not in TOOL_NAMES,
                             "tool_name_conflict_no_changes_made")
+    # Accept only constructors imported from the official SDK. The production
+    # service uses v2 MCPServer; v1 FastMCP remains supported without migration.
+    imports = {}
+    for node in tree.body:
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                imports[alias.asname or alias.name] = (node.module or "") + "." + alias.name
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                imports[alias.asname or alias.name.split(".")[0]] = alias.name if alias.asname else alias.name.split(".")[0]
+
+    def qualified(node):
+        if isinstance(node, ast.Name):
+            return imports.get(node.id, "")
+        if isinstance(node, ast.Attribute):
+            parent = qualified(node.value)
+            return parent + "." + node.attr if parent else ""
+        return ""
+
+    constructors = {"mcp.server.MCPServer", "mcp.server.fastmcp.FastMCP"}
     variables = []
     for node in tree.body:
-        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
-            func = node.value.func
-            if (isinstance(func, ast.Name) and func.id == "FastMCP") or (
-                    isinstance(func, ast.Attribute) and func.attr == "FastMCP"):
-                variables.extend(x.id for x in node.targets if isinstance(x, ast.Name))
+        if isinstance(node, (ast.Assign, ast.AnnAssign)) and isinstance(node.value, ast.Call):
+            if qualified(node.value.func) in constructors:
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                variables.extend(x.id for x in targets if isinstance(x, ast.Name))
     require(len(variables) == 1, "unsupported_mcp_construction_no_changes_made")
     guards = [node for node in tree.body if isinstance(node, ast.If) and
               ast.dump(node.test) in (
                   ast.dump(ast.parse('__name__ == "__main__"', mode="eval").body),
                   ast.dump(ast.parse('"__main__" == __name__', mode="eval").body))]
     require(len(guards) == 1, "unsupported_server_entrypoint_no_changes_made")
+    require(any(isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name) and node.func.value.id == variables[0]
+                and node.func.attr == "run" for node in ast.walk(guards[0])),
+            "unsupported_server_entrypoint_no_changes_made")
     for node in tree.body:
         if node is guards[0]:
             continue
@@ -107,6 +130,37 @@ def server_patch(source):
     result = "".join(lines)
     compile(result, str(SERVER), "exec")
     return result, variables[0]
+
+
+def registered_names(source, variable):
+    """Static names of the existing decorator tools; never execute source as root."""
+    names = set()
+    for node in ast.parse(source).body:
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for decorator in node.decorator_list:
+            if (isinstance(decorator, ast.Call) and isinstance(decorator.func, ast.Attribute)
+                    and isinstance(decorator.func.value, ast.Name)
+                    and decorator.func.value.id == variable and decorator.func.attr == "tool"):
+                explicit = [k.value for k in decorator.keywords if k.arg == "name"]
+                require(not explicit or (isinstance(explicit[0], ast.Constant)
+                        and isinstance(explicit[0].value, str)), "dynamic_tool_name_not_supported")
+                names.add(explicit[0].value if explicit else node.name)
+    return names
+
+
+def registry_check_program(server, variable, required_names):
+    """Use the public registry API shared by MCP v1 and v2, not private managers."""
+    return ("import importlib.util,asyncio,sys,inspect;"
+            f"sys.path.insert(0,{str(server.parent)!r});"
+            f"s=importlib.util.spec_from_file_location('ops_check',{str(server)!r});"
+            "m=importlib.util.module_from_spec(s);sys.modules[s.name]=m;s.loader.exec_module(m);"
+            f"app=getattr(m,{variable!r});"
+            "value=app.list_tools();"
+            "tools=asyncio.run(value) if inspect.isawaitable(value) else value;"
+            "names={x.name for x in tools};"
+            f"assert {required_names!r}<=names;"
+            "print('registry_verified='+str(len(names)))")
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -292,15 +346,7 @@ def _install_locked(commit, expected, upgrade=False):
         require(SERVER.read_text() == source, "server_changed_during_install")
         atomic(SERVER, patched.encode(), st.st_mode & 0o777, st.st_uid, st.st_gid)
         # Public SDK registry inspection verifies original and new tools can coexist.
-        test = ("import importlib.util,asyncio,sys,inspect;"
-                f"sys.path.insert(0,{str(SERVER.parent)!r});"
-                f"s=importlib.util.spec_from_file_location('ops_check',{str(SERVER)!r});"
-                "m=importlib.util.module_from_spec(s);sys.modules[s.name]=m;s.loader.exec_module(m);"
-                f"app=getattr(m,{mcp_name!r});"
-                "value=app.get_tools() if hasattr(app,'get_tools') else app.list_tools();"
-                "tools=asyncio.run(value) if inspect.isawaitable(value) else value;"
-                "names=set(tools) if isinstance(tools,dict) else {x.name for x in tools};"
-                "assert {'network_snapshot','prepare_network_change','model_smoke_test','upgrade_ops_extension'}<=names")
+        test = registry_check_program(SERVER, mcp_name, TOOL_NAMES | registered_names(source, mcp_name))
         test_argv = [str(VENV_PYTHON), "-c", test]
         if user != "root":
             test_argv = ["runuser", "-u", user, "--", *test_argv]

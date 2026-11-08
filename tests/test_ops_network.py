@@ -4,6 +4,8 @@ import base64
 import importlib.util
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 import tempfile
 import unittest
@@ -57,6 +59,31 @@ def existing_tool():
 if __name__ == "__main__":
     app.run()
 '''
+
+# Production's observed imports, instance, annotated inputs, all eleven existing
+# decorator tools and standard main guard. Bodies are inert; no production secrets.
+EXISTING_TOOLS = {"system_overview", "jarvis_status", "proxy_status", "git_status", "recent_logs",
+                  "restart_jarvis", "recover_codex_session", "set_proxy_node", "restart_mihomo",
+                  "deploy_jarvis_main", "rollback_jarvis"}
+MCP2_SERVER = '''from typing import Annotated, Literal
+from mcp.server import MCPServer
+from mcp.types import ToolAnnotations
+from pydantic import Field
+mcp = MCPServer("Existing production-style Ops")
+READ_ONLY = ToolAnnotations(read_only_hint=True, destructive_hint=False, open_world_hint=False)
+PRIVATE_WRITE = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=False)
+HIGH_IMPACT_WRITE = ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=False, open_world_hint=False)
+SessionId = Annotated[str, Field(min_length=1, max_length=128)]
+ProxyTarget = Literal["primary_jp01", "primary_jp02", "backup_jp01"]
+CommitSha = Annotated[str, Field(min_length=40, max_length=40)]
+'''
+for _name in sorted(EXISTING_TOOLS):
+    _hint = "READ_ONLY" if _name in {"system_overview", "jarvis_status", "proxy_status", "git_status", "recent_logs"} else (
+        "HIGH_IMPACT_WRITE" if _name in {"deploy_jarvis_main", "rollback_jarvis"} else "PRIVATE_WRITE")
+    _input = {"recover_codex_session": "session_id: SessionId", "set_proxy_node": "target: ProxyTarget",
+              "rollback_jarvis": "commit_sha: CommitSha"}.get(_name, "")
+    MCP2_SERVER += f'@mcp.tool(title="Existing {_name}", annotations={_hint})\ndef {_name}({_input}) -> str:\n    return "unchanged"\n'
+MCP2_SERVER += 'if __name__ == "__main__":\n    mcp.run()\n'
 
 
 class FakeController:
@@ -340,6 +367,56 @@ class NetworkTests(unittest.TestCase):
 
 
 class InstallerTests(unittest.TestCase):
+    def test_production_mcpserver_structure_preserves_all_existing_tools(self):
+        first, variable = installer.server_patch(MCP2_SERVER)
+        second, _ = installer.server_patch(first)
+        self.assertEqual(first, second)
+        self.assertEqual(variable, "mcp")
+        self.assertEqual(installer.registered_names(first, variable), EXISTING_TOOLS)
+        self.assertIn('annotations=HIGH_IMPACT_WRITE', first)
+        self.assertIn('session_id: SessionId', first)
+        self.assertTrue(first.endswith('    mcp.run()\n'))
+
+    def test_sdk_import_aliases_and_annotated_instance(self):
+        variants = [
+            MCP2_SERVER.replace('import MCPServer', 'import MCPServer as Ops').replace('mcp = MCPServer(', 'mcp: Ops = Ops('),
+            MCP2_SERVER.replace('from mcp.server import MCPServer', 'import mcp.server as sdk').replace('mcp = MCPServer(', 'mcp = sdk.MCPServer('),
+        ]
+        for source in variants:
+            with self.subTest(source=source[:100]):
+                self.assertEqual(installer.server_patch(source)[1], 'mcp')
+
+    def test_unknown_constructors_multiple_instances_and_wrong_run_are_rejected(self):
+        variants = [
+            MCP2_SERVER.replace('from mcp.server import MCPServer', 'from unknown import MCPServer'),
+            MCP2_SERVER + '\nsecond = MCPServer("second")\n',
+            MCP2_SERVER.replace('mcp.run()', 'different.run()'),
+            MCP2_SERVER.replace('mcp = MCPServer(', 'mcp = factory('),
+        ]
+        for source in variants:
+            with self.subTest(source=source[:100]), self.assertRaises(RuntimeError):
+                installer.server_patch(source)
+
+    def test_public_registry_check_runs_patched_production_fixture(self):
+        try:
+            from mcp.server import MCPServer
+        except ImportError:
+            from mcp.server.fastmcp import FastMCP as MCPServer
+            source = SERVER
+            required = installer.TOOL_NAMES | {'existing_tool'}
+        else:
+            source = MCP2_SERVER
+            required = installer.TOOL_NAMES | EXISTING_TOOLS
+        patched, variable = installer.server_patch(source)
+        patched = patched.replace("'/opt/jarvis-ops-network'", repr(str(ROOT / 'ops')))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'server.py'
+            path.write_text(patched)
+            result = subprocess.run([sys.executable, '-c', installer.registry_check_program(path, variable, required)],
+                                    capture_output=True, text=True, timeout=25)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('registry_verified=' + str(len(required)), result.stdout)
+
     def test_existing_tools_preserved_and_registration_is_idempotent(self):
         first, variable = installer.server_patch(SERVER)
         second, _ = installer.server_patch(first)
@@ -500,7 +577,7 @@ class ExtensionTests(unittest.TestCase):
     def test_registration_and_schema(self):
         class FakeMCP:
             def __init__(self): self.tools = {}
-            def tool(self):
+            def tool(self, **kwargs):
                 def register(fn): self.tools[fn.__name__] = fn; return fn
                 return register
         app = FakeMCP()
@@ -527,10 +604,10 @@ class ExtensionTests(unittest.TestCase):
 
     def test_real_sdk_preserves_existing_tools_and_builds_typed_schemas(self):
         try:
-            from mcp.server.fastmcp import FastMCP
+            from mcp.server import MCPServer
         except ImportError:
-            self.skipTest("MCP SDK not installed; CI installs the supported v1 SDK")
-        app = FastMCP("Ops test")
+            from mcp.server.fastmcp import FastMCP as MCPServer
+        app = MCPServer("Ops test")
         @app.tool()
         def original_tool() -> dict:
             return {"ok": True}
@@ -539,8 +616,22 @@ class ExtensionTests(unittest.TestCase):
         self.assertIn("original_tool", tools)
         self.assertEqual(len(tools), 12)
         self.assertEqual(set(tools), installer.TOOL_NAMES | {"original_tool"})
-        schema = tools["probe_proxy_nodes"].inputSchema
+        tool = tools["probe_proxy_nodes"]
+        schema = tool.input_schema if hasattr(tool, 'input_schema') else tool.inputSchema
         self.assertEqual(schema["properties"]["provider"]["enum"], ["primary", "backup"])
+        for name in installer.TOOL_NAMES:
+            self.assertIsNotNone(tools[name].annotations)
+        def hint(name, snake, camel):
+            values = tools[name].annotations.model_dump()
+            return values[snake] if snake in values else values[camel]
+        self.assertTrue(hint('network_snapshot', 'read_only_hint', 'readOnlyHint'))
+        self.assertFalse(hint('network_snapshot', 'open_world_hint', 'openWorldHint'))
+        self.assertTrue(hint('apply_network_change', 'destructive_hint', 'destructiveHint'))
+        self.assertFalse(hint('apply_network_change', 'read_only_hint', 'readOnlyHint'))
+        self.assertTrue(hint('upgrade_ops_extension', 'destructive_hint', 'destructiveHint'))
+        with mock.patch.object(extension, 'invoke', return_value={'ok': True, 'result': {'version': 'fixture'}}):
+            result = asyncio.run(app.call_tool('ops_extension_status', {}))
+        self.assertIn('fixture', str(result))
 
 
 if __name__ == "__main__":

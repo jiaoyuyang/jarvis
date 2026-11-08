@@ -27,8 +27,10 @@ wg0.conf，不扩展到默认路由，也不删除原有 AllowedIPs。更复杂�
 ## 安装前提
 
 - 已有 `/opt/jarvis-ops-mcp/server.py`、对应 `.venv/bin/python` 和
-  `jarvis-ops-tunnel.service`。支持单个顶层 `FastMCP(...)` 实例及标准 main guard；
-  不认识的服务结构会在写入前停止，不会整份替换未知服务。
+  `jarvis-ops-tunnel.service`。支持单个顶层官方 SDK 实例及标准 main guard：
+  MCP v1 的 `from mcp.server.fastmcp import FastMCP`，或现网使用的 MCP v2
+  `from mcp.server import MCPServer`；同样支持这两种导入的别名。
+  不认识的服务结构会在写入前停止，不会整份替换未知服务，也不更换现有 SDK。
 - Ops 子进程正在运行。安装器从该实际进程的 UID 确定执行身份，而不是猜测
   隧道服务的 User。先调用一次原有 `jarvis_status` 可唤起其 MCP 子进程。
 - 宿主机 Python 已安装 PyYAML，且有 systemd、sudo/visudo、Docker、Mihomo。
@@ -51,7 +53,9 @@ wg0.conf，不扩展到默认路由，也不删除原有 AllowedIPs。更复杂�
 
    安装器从固定仓库读取其余三个文件，校验提交和每个文件哈希后安装到
    `/opt/jarvis-ops-network`，配置专用 root helper 的 sudo 白名单，并在原 MCP
-   main guard 之前注册工具。不会清理或拉取服务器上有未提交改动的 Jarvis 仓库。
+   main guard 之前注册工具。以实际服务账号调用 SDK 公共 `list_tools()` 接口，
+   同时检查全部原有工具与全部 11 个扩展工具。不会清理或拉取服务器上有未提交
+   改动的 Jarvis 仓库。
 
 4. 初始安装先备份并启动 180 秒独立恢复任务，检查 MCP 注册后延迟重启 **Ops 隧道**，
    不重启 Jarvis、Mihomo 或 WireGuard。随后以实际服务账号验证 sudo bridge、
@@ -94,5 +98,7 @@ python3 -m unittest discover -s tests
 
 测试覆盖新探测回执、过期/失败回执、独立恢复顺序、确认失败、延迟回滚、配置
 漂移、路由范围限制、发布哈希、安装失败恢复、服务账号权限验证及真实 MCP SDK
-注册。sudo helper 使用 Python `-I` 隔离环境，返回固定错误码，密钥仅在宿主机
+注册及调用。CI 分别安装真实 MCP 1.29.0、2.0.0、2.3.0；v2 使用含全部 11 个
+现网工具、权限标注和 Annotated 输入的无秘密结构样本，验证扩展后共 22 个工具。
+权限标注兼容两代 SDK 的字段名。sudo helper 使用 Python `-I` 隔离环境，返回固定错误码，密钥仅在宿主机
 私有文件中使用；备份与事务目录权限为 0700、数据文件 0600。
