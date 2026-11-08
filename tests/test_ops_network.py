@@ -122,6 +122,8 @@ class FakeController:
             return {"Status": 2 if self.dns_failure else 0, "Answer": [] if self.dns_failure else [{"data": "1.2.3.4"}]}
         if name == "/configs":
             return {}
+        if name == '/cache/dns/flush' and method == 'POST':
+            return {}
         raise AssertionError("Unexpected controller operation: " + name)
 
 
@@ -232,6 +234,60 @@ class NetworkTests(unittest.TestCase):
         self.assertEqual(len([c for c in self.controller.calls if "/delay?" in c[0]]), 4)
         self.controller.probe_failure = True
         self.assertFalse(self.e.probe()["results"][0]["ok"])
+
+    def test_provider_dns_plan_changes_only_node_policy_and_keeps_bootstrap(self):
+        url='https://web.laddercat.net/subscribe/'+'a'*32
+        text=CONFIG+'proxy-providers:\n  梯子猫订阅:\n    url: '+url+'\n'
+        self.config.write_text(text)
+        self.e.config=engine.yaml.safe_load(text)
+        self.controller.groups[engine.SELECTORS['backup']]['alive']=True
+        with mock.patch.object(self.e,'primary_dns_template',return_value=list(engine.PRIMARY_DNS_RESOLVERS)):
+            plan=self.e.prepare('stabilize_dns')
+        self.assertEqual(self.config.read_text(),text)
+        self.assertNotIn('a'*32,json.dumps(plan))
+        self.assertNotIn('PASSWORD_SENTINEL',json.dumps(plan))
+        record=self.e.load(plan['id'])
+        candidate=engine.yaml.safe_load(record['new_config'])
+        self.assertEqual(candidate['dns']['proxy-server-nameserver'],self.e.config['dns']['proxy-server-nameserver'])
+        self.assertEqual(candidate['proxy-providers'],self.e.config['proxy-providers'])
+        self.assertEqual(candidate['proxies'],self.e.config['proxies'])
+        for domain in engine.PRIMARY_NODE_DOMAINS:
+            self.assertEqual(candidate['dns']['proxy-server-nameserver-policy'][domain],
+                             [u+'#一元日本01专线' for u in engine.PRIMARY_DNS_RESOLVERS])
+        self.e.apply(plan['id'])
+        self.assertIn(('/cache/dns/flush','POST',None),self.controller.calls)
+        self.e.rollback(plan['id'])
+        self.assertEqual(self.config.read_text(),text)
+        with mock.patch.object(self.e,'primary_dns_template',return_value=list(engine.PRIMARY_DNS_RESOLVERS)):
+            failed=self.e.prepare('stabilize_dns')
+        with mock.patch.object(self.e,'flush_dns_cache',return_value=False):
+            with self.assertRaisesRegex(engine.OperationError,'dns_cache_flush_failed'):
+                self.e.apply(failed['id'])
+        self.assertEqual(self.e.status(failed['id'])['phase'],'rolled_back')
+        self.assertEqual(self.config.read_text(),text)
+
+    def test_mapping_insert_preserves_comments_and_other_values(self):
+        text='dns:\n  # keep DNS comment\n  enable: true\nsecret: SECRET_SENTINEL\n'
+        changed=engine.yaml_mapping_update(text,('dns',),{'new-policy':{'cn.bing.com':['https://example.com/inst#backup']}})
+        self.assertIn('# keep DNS comment',changed)
+        self.assertTrue(changed.endswith('secret: SECRET_SENTINEL\n'))
+        self.assertTrue(engine.yaml.safe_load(changed)['dns']['enable'])
+        inline='dns: {enable: true}\n'
+        self.assertIn('new',engine.yaml.safe_load(engine.yaml_mapping_update(inline,('dns',),{'new':1}))['dns'])
+
+    def test_subscription_template_is_pinned_and_rejects_untrusted_resolvers(self):
+        with mock.patch.object(engine.urllib.request,'build_opener') as builder:
+            for url in ('http://web.laddercat.net/subscribe/'+'a'*32, 'https://evil.example/subscribe/'+'a'*32,
+                        'https://web.laddercat.net/subscribe/'+'a'*32+'?token=bad'):
+                with self.assertRaises(engine.OperationError): self.e.primary_dns_template(url)
+            builder.assert_not_called()
+        body={'dns':{'proxy-server-nameserver':['https://evil.example/collect']},'proxies':[]}
+        response=mock.MagicMock()
+        response.__enter__.return_value.read.return_value=engine.yaml.safe_dump(body).encode()
+        opener=mock.Mock();opener.open.return_value=response
+        with mock.patch.object(engine.urllib.request,'build_opener',return_value=opener):
+            with self.assertRaisesRegex(engine.OperationError,'provider_dns_template_changed'):
+                self.e.primary_dns_template('https://web.laddercat.net/subscribe/'+'a'*32)
 
     def test_pagination_and_bounds(self):
         self.assertEqual(self.e.probe(limit=1)["next_offset"], 1)
