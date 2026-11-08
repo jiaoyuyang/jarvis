@@ -1,9 +1,9 @@
 {
-  "version": "1.1.1",
-  "package_sha256": "43621a40cef1623432fc11bad6baea24f47e9f0612afedac12b20295850eea6c",
+  "version": "1.1.2",
+  "package_sha256": "3d0f7a1e1405532506a6a1946dd83162d7f8d82915d011ac5d46584fd918e0e9",
   "sha256": {
-    "network_engine.py": "efe16874baf56c054af2bcc7ffce77e2c3a9d9ac5ba394b207bd013448940393",
-    "mcp_extension.py": "8d5b32cc4b8a83f42edd18b802680e5ebc5e7f7dc1a1154820577772f35e718a",
+    "network_engine.py": "b5328b23847240dcaed8aa74bad9ac2fc965c099bdbd1bed3c06669cd527d755",
+    "mcp_extension.py": "1b86380c3cca55b431ceee2f44ed681ee97466841c8fdecfa6f805e8ae6199f3",
     "install.py": "4001ffd4230665a7fceb07acdc94dff1223b3b531c223857b386009c7296d64c"
   }
 }

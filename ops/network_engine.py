@@ -24,7 +24,7 @@ import uuid
 
 import yaml
 
-VERSION = "1.1.1"
+VERSION = "1.1.2"
 CONFIG = Path("/etc/mihomo/config.yaml")
 WIREGUARD = Path("/etc/wireguard/wg0.conf")
 STATE = Path("/var/lib/jarvis-ops-network")
@@ -193,8 +193,15 @@ def yaml_patch(text, changes):
     spans = []
     for path, value in changes:
         node = yaml_node(root, path)
+        replacement = json.dumps(value, ensure_ascii=False)
+        # Block collection end marks consume the newline/indent before the next
+        # mapping key. Reintroduce that separator when replacing with flow JSON.
+        if (isinstance(node, (yaml.MappingNode, yaml.SequenceNode)) and not node.flow_style
+                and node.end_mark.line > node.start_mark.line
+                and node.end_mark.index < len(text) and text[node.end_mark.index] not in '\r\n'):
+            replacement += '\n' + ' ' * node.end_mark.column
         spans.append((node.start_mark.index, node.end_mark.index,
-                      json.dumps(value, ensure_ascii=False)))
+                      replacement))
         target = expected
         for key in path[:-1]:
             target = target[key]
@@ -480,7 +487,10 @@ class Engine:
         with opener.open(request, timeout=8) as response:
             raw = response.read(1_048_577)
         require(len(raw) <= 1_048_576, 'subscription_too_large')
-        data = yaml.safe_load(raw)
+        try:
+            data = yaml.safe_load(raw)
+        except yaml.YAMLError:
+            raise OperationError('invalid_subscription_yaml') from None
         require(isinstance(data,dict), 'invalid_subscription')
         resolvers = (data.get('dns') or {}).get('proxy-server-nameserver')
         require(isinstance(resolvers,list) and len(resolvers)==2 and set(resolvers)==set(PRIMARY_DNS_RESOLVERS),
