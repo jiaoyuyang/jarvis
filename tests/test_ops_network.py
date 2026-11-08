@@ -164,6 +164,9 @@ class NetworkTests(unittest.TestCase):
         self.wg.write_text(WG)
         self.controller, self.runner = FakeController(), FakeRunner()
         self.now = 1000.0
+        identity = mock.patch.object(engine.Engine, 'management_identity', return_value={'user': 'jarvisops', 'uid': 4567})
+        identity.start()
+        self.addCleanup(identity.stop)
         self.chown = mock.patch.object(os, "fchown")
         self.chown.start()
         self.addCleanup(self.chown.stop)
@@ -237,7 +240,7 @@ class NetworkTests(unittest.TestCase):
 
     def test_provider_dns_plan_changes_only_node_policy_and_keeps_bootstrap(self):
         url='https://web.laddercat.net/subscribe/'+'a'*32
-        text=CONFIG+'proxy-providers:\n  梯子猫订阅:\n    url: '+url+'\n'
+        text=CONFIG+'rules:\n  - DOMAIN,example.org,主备自动切换\n  - MATCH,主备自动切换\n'+'proxy-providers:\n  梯子猫订阅:\n    url: '+url+'\n'
         self.config.write_text(text)
         self.e.config=engine.yaml.safe_load(text)
         self.controller.groups[engine.SELECTORS['backup']]['alive']=True
@@ -256,8 +259,17 @@ class NetworkTests(unittest.TestCase):
         for domain in engine.PRIMARY_NODE_DOMAINS:
             self.assertEqual(candidate['dns']['proxy-server-nameserver-policy'][domain],
                              [u+'#一元日本01专线' for u in engine.PRIMARY_DNS_RESOLVERS])
+        self.assertEqual(candidate['rules'][0], 'UID,4567,一元日本01专线')
+        self.assertEqual(candidate['rules'][1:], self.e.config['rules'])
+        self.assertEqual(candidate['find-process-mode'], 'strict')
+        self.assertEqual(plan['summary']['management_route']['uid'], 4567)
         self.assertEqual(record['new_selectors']['primary'], 'JP 日本｜中转 01')
         self.assertEqual(plan['summary']['target_selectors'], record['new_selectors'])
+        with mock.patch.object(self.e, 'management_identity', return_value={'user': 'jarvisops', 'uid': 9876}):
+            with self.assertRaisesRegex(engine.OperationError, 'management_identity_drift'):
+                self.e.apply(plan['id'])
+        self.assertEqual(self.config.read_text(), text)
+        self.assertEqual(self.e.selected(), original_selectors)
         self.e.apply(plan['id'])
         self.assertEqual(self.e.selected()['primary'], 'JP 日本｜中转 01')
         self.assertIn(('/cache/dns/flush','POST',None),self.controller.calls)
@@ -866,6 +878,26 @@ class ExtensionTests(unittest.TestCase):
         with mock.patch.object(extension, 'invoke', return_value={'ok': True, 'result': {'version': 'fixture'}}):
             result = asyncio.run(app.call_tool('ops_extension_status', {}))
         self.assertIn('fixture', str(result))
+
+
+class ManagementIdentityTests(unittest.TestCase):
+    def test_fixed_service_identity_rejects_root_and_process_uid_drift(self):
+        instance = engine.Engine.__new__(engine.Engine)
+        instance.runner = mock.Mock(return_value='User=jarvisops\nMainPID=1234\n')
+        account = mock.Mock(pw_uid=4567)
+        with mock.patch.object(engine.pwd, 'getpwnam', return_value=account) as lookup:
+            with mock.patch.object(Path, 'read_text', return_value='Uid:\t4567\t4567\t4567\t4567\n'):
+                self.assertEqual(instance.management_identity(), {'user': 'jarvisops', 'uid': 4567})
+                lookup.assert_called_once_with('jarvisops')
+            with mock.patch.object(Path, 'read_text', return_value='Uid:\t4567\t0\t0\t0\n'):
+                with self.assertRaisesRegex(engine.OperationError, 'management_uid_mismatch'):
+                    instance.management_identity()
+            account.pw_uid = 0
+            with self.assertRaisesRegex(engine.OperationError, 'unsupported_management_uid'):
+                instance.management_identity()
+        instance.runner.return_value = 'User=root\nMainPID=1234\n'
+        with self.assertRaisesRegex(engine.OperationError, 'unsupported_management_account'):
+            instance.management_identity()
 
 
 if __name__ == "__main__":
