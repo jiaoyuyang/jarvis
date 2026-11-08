@@ -24,7 +24,7 @@ import uuid
 
 import yaml
 
-VERSION = "1.1.2"
+VERSION = "1.1.3"
 CONFIG = Path("/etc/mihomo/config.yaml")
 WIREGUARD = Path("/etc/wireguard/wg0.conf")
 STATE = Path("/var/lib/jarvis-ops-network")
@@ -245,6 +245,26 @@ def yaml_mapping_update(text, path, values):
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *args, **kwargs):
         raise OperationError("unexpected_redirect")
+
+
+def dns_candidate(text, updates):
+    before = yaml.safe_load(text)
+    expected = copy.deepcopy(before)
+    new_dns = copy.deepcopy(before['dns'])
+    new_dns.update(updates)
+    expected['dns'] = new_dns  # Break aliases so other top-level values cannot change.
+    try:
+        candidate = yaml_mapping_update(text, ('dns',), updates)
+        if yaml.safe_load(candidate) == expected:
+            return candidate, False
+    except yaml.YAMLError:
+        pass
+    except OperationError as error:
+        if str(error) != 'yaml_patch_scope_mismatch':
+            raise
+    candidate = yaml.safe_dump(expected, allow_unicode=True, sort_keys=False)
+    require(yaml.safe_load(candidate) == expected, 'normalized_yaml_scope_mismatch')
+    return candidate, True
 
 
 class Controller:
@@ -502,6 +522,7 @@ class Engine:
     def prepare(self, profile, primary_receipt="", backup_receipt=""):
         require(profile in ("switch_primary", "stabilize_dns", "persist_wireguard"), "invalid_profile")
         old_text = self.config_path.read_text()
+        require(yaml.safe_load(old_text) == self.config, 'configuration_drift')
         new_text, old_wg, new_wg = old_text, None, None
         selections = self.selected()
         target = dict(selections)
@@ -542,7 +563,9 @@ class Engine:
                 summary['primary_node_dns'] = {'domains': sorted(PRIMARY_NODE_DOMAINS),
                     'resolvers': resolvers, 'via': SELECTORS['backup'], 'source_sha256': digest(url.encode()),
                     'scope': 'node domains only; global bootstrap, credentials, SNI, routes and backup unchanged'}
-            new_text = yaml_mapping_update(old_text, ('dns',), updates)
+            new_text, normalized = dns_candidate(old_text, updates)
+            summary['yaml_layout_normalized'] = normalized
+            summary['semantic_scope'] = 'Only the declared DNS fields change; all other values must match exactly.'
             summary["dns_fallback"] = ["dns.quad9.net via proxy", "dns.google via proxy"]
         else:
             old_wg = self.wg_path.read_text()

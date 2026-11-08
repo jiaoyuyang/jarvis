@@ -302,6 +302,25 @@ class NetworkTests(unittest.TestCase):
             with self.assertRaisesRegex(engine.OperationError,'provider_dns_template_changed'):
                 self.e.primary_dns_template('https://web.laddercat.net/subscribe/'+'a'*32)
 
+    def test_dns_alias_cannot_modify_another_mapping(self):
+        text='other: &shared\n  prefer-h3: true\n  fallback: [https://old.example]\ndns: *shared\nsecret: SECRET_SENTINEL\n'
+        candidate, normalized=engine.dns_candidate(text,{'prefer-h3':False,'new-field':{'host.example':['1.1.1.1']}})
+        before=engine.yaml.safe_load(text);after=engine.yaml.safe_load(candidate)
+        self.assertTrue(normalized)
+        self.assertEqual(after['other'],before['other'])
+        self.assertEqual(after['secret'],before['secret'])
+        self.assertFalse(after['dns']['prefer-h3'])
+
+    def test_dns_render_failure_normalizes_without_changing_other_values(self):
+        text=CONFIG
+        with mock.patch.object(engine,'yaml_mapping_update',side_effect=engine.yaml.scanner.ScannerError()):
+            candidate, normalized=engine.dns_candidate(text,{'prefer-h3':False})
+        before=engine.yaml.safe_load(text);after=engine.yaml.safe_load(candidate)
+        self.assertTrue(normalized)
+        self.assertEqual(after['proxies'],before['proxies'])
+        self.assertEqual(after['proxy-groups'],before['proxy-groups'])
+        self.assertEqual(after['secret'],before['secret'])
+
     def test_pagination_and_bounds(self):
         self.assertEqual(self.e.probe(limit=1)["next_offset"], 1)
         self.assertIsNone(self.e.probe(offset=1, limit=1)["next_offset"])
