@@ -363,6 +363,45 @@ class NetworkTests(unittest.TestCase):
             with self.subTest(kwargs=kwargs), self.assertRaises(engine.OperationError):
                 self.e.probe(**kwargs)
 
+    def test_switch_handles_normalized_indentless_lists_without_other_changes(self):
+        text = engine.yaml.safe_dump(engine.yaml.safe_load(CONFIG), allow_unicode=True, sort_keys=False)
+        self.config.write_text(text)
+        self.e.config = engine.yaml.safe_load(text)
+        plan = self.e.prepare('switch_primary', *self.receipts())
+        record = self.e.load(plan['id'])
+        candidate = engine.yaml.safe_load(record['new_config'])
+        wanted = copy.deepcopy(self.e.config)
+        for group in wanted['proxy-groups']:
+            group['proxies'] = ['梯子猫', '一元日本01专线'] + [x for x in group['proxies'] if x not in engine.SELECTORS.values()]
+        self.assertEqual(candidate, wanted)
+        self.assertTrue(plan['summary']['yaml_layout_normalized'])
+        self.assertEqual(self.config.read_text(), text)
+
+    def test_scoped_normalization_breaks_aliases_without_changing_other_values(self):
+        text = 'secret: SECRET_SENTINEL\ngroups:\n- proxies: &members [梯子猫, 自动选择]\n- proxies: *members\n'
+        changed, normalized = engine.scoped_candidate(text, [(('groups', 0, 'proxies'), ['一元日本01专线'])])
+        result = engine.yaml.safe_load(changed)
+        self.assertTrue(normalized)
+        self.assertEqual(result, {'secret': 'SECRET_SENTINEL', 'groups': [
+            {'proxies': ['一元日本01专线']}, {'proxies': ['梯子猫', '自动选择']}]})
+
+    def test_backup_plan_requires_only_fresh_backup_and_restores_exact_baseline(self):
+        backup = self.e.probe('backup')['results'][0]['id']
+        before = copy.deepcopy(self.controller.groups)
+        plan = self.e.prepare('switch_backup', backup_receipt=backup)
+        self.assertEqual(self.controller.groups, before)
+        self.assertEqual(self.config.read_text(), CONFIG)
+        self.assertEqual(plan['summary']['fallback_priority'], ['一元日本01专线', '梯子猫'])
+        self.e.apply(plan['id'])
+        for group in engine.yaml.safe_load(self.config.read_text())['proxy-groups']:
+            self.assertEqual(group['proxies'][:2], ['一元日本01专线', '梯子猫'])
+        self.e.rollback(plan['id'])
+        self.assertEqual(self.config.read_text(), CONFIG)
+        self.assertEqual(self.controller.groups, before)
+        self.now += 181
+        with self.assertRaisesRegex(engine.OperationError, 'probe_expired'):
+            self.e.prepare('switch_backup', backup_receipt=backup)
+
     def test_prepare_does_not_touch_runtime_and_is_reviewable(self):
         before = copy.deepcopy(self.controller.groups)
         plan = self.e.prepare("switch_primary", *self.receipts())
@@ -405,7 +444,7 @@ class NetworkTests(unittest.TestCase):
         for name in engine.FALLBACKS:
             members = next(g for g in cfg["proxy-groups"] if g["name"] == name)["proxies"]
             self.assertEqual(members[0], "梯子猫")
-            self.assertEqual(members[-1], "一元日本01专线")
+            self.assertEqual(members[1], "一元日本01专线")
 
     def test_failed_guard_does_not_leave_configuration_changes(self):
         identity = self.switch()

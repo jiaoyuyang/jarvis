@@ -25,7 +25,7 @@ import uuid
 
 import yaml
 
-VERSION = "1.1.5"
+VERSION = "1.2.0"
 CONFIG = Path("/etc/mihomo/config.yaml")
 WIREGUARD = Path("/etc/wireguard/wg0.conf")
 STATE = Path("/var/lib/jarvis-ops-network")
@@ -256,6 +256,29 @@ def dns_candidate(text, updates):
     expected['dns'] = new_dns  # Break aliases so other top-level values cannot change.
     try:
         candidate = yaml_mapping_update(text, ('dns',), updates)
+        if yaml.safe_load(candidate) == expected:
+            return candidate, False
+    except yaml.YAMLError:
+        pass
+    except OperationError as error:
+        if str(error) != 'yaml_patch_scope_mismatch':
+            raise
+    candidate = yaml.safe_dump(expected, allow_unicode=True, sort_keys=False)
+    require(yaml.safe_load(candidate) == expected, 'normalized_yaml_scope_mismatch')
+    return candidate, True
+
+
+def scoped_candidate(text, changes):
+    """Fall back to normalization only after checking exact declared semantics."""
+    expected = copy.deepcopy(yaml.safe_load(text))
+    for path, value in changes:
+        target = expected
+        for key in path[:-1]:
+            target[key] = copy.deepcopy(target[key])
+            target = target[key]
+        target[path[-1]] = copy.deepcopy(value)
+    try:
+        candidate = yaml_patch(text, changes)
         if yaml.safe_load(candidate) == expected:
             return candidate, False
     except yaml.YAMLError:
@@ -543,18 +566,24 @@ class Engine:
         return list(PRIMARY_DNS_RESOLVERS)
 
     def prepare(self, profile, primary_receipt="", backup_receipt=""):
-        require(profile in ("switch_primary", "stabilize_dns", "persist_wireguard"), "invalid_profile")
+        require(profile in ("switch_primary", "switch_backup", "stabilize_dns", "persist_wireguard"), "invalid_profile")
         old_text = self.config_path.read_text()
         require(yaml.safe_load(old_text) == self.config, 'configuration_drift')
         new_text, old_wg, new_wg = old_text, None, None
         selections = self.selected()
         target = dict(selections)
         summary = {"profile": profile}
-        if profile == "switch_primary":
+        if profile in ("switch_primary", "switch_backup"):
             require(self.config.get("profile", {}).get("store-selected") is True,
                     "selected_cache_not_enabled")
-            target = {role: self.fresh_receipt(identity, role)["node"] for role, identity in (
-                ("primary", primary_receipt), ("backup", backup_receipt))}
+            if profile == 'switch_primary':
+                target = {role: self.fresh_receipt(identity, role)["node"] for role, identity in (
+                    ("primary", primary_receipt), ("backup", backup_receipt))}
+            else:
+                require(not primary_receipt, 'unexpected_primary_receipt')
+                target['backup'] = self.fresh_receipt(backup_receipt, 'backup')['node']
+            preferred = 'primary' if profile == 'switch_primary' else 'backup'
+            order = [SELECTORS[preferred], SELECTORS['backup' if preferred == 'primary' else 'primary']]
             groups = self.config.get("proxy-groups", [])
             edits = []
             for name in FALLBACKS:
@@ -563,9 +592,12 @@ class Engine:
                 i = matches[0]
                 require(groups[i].get("type") == "fallback", "unsupported_fallback_group")
                 members = groups[i].get("proxies", [])
-                members = [SELECTORS["primary"]] + [x for x in members if x not in SELECTORS.values()] + [SELECTORS["backup"]]
+                members = order + [x for x in members if x not in SELECTORS.values()]
                 edits.append((("proxy-groups", i, "proxies"), members))
-            new_text = yaml_patch(old_text, edits)
+            new_text, normalized = scoped_candidate(old_text, edits)
+            summary["yaml_layout_normalized"] = normalized
+            summary["fallback_priority"] = order
+            summary["semantic_scope"] = "Only the declared fallback member lists change; all other values match exactly."
             summary["target_selectors"] = target
         elif profile == "stabilize_dns":
             dns = self.config.get("dns", {})
@@ -681,9 +713,10 @@ class Engine:
                 actual = self.management_identity()
                 require(all(actual[k] == item['summary']['management_route'][k] for k in ('user', 'uid')),
                         'management_identity_drift')
-            if item["profile"] == "switch_primary":
+            if item["profile"] in ("switch_primary", "switch_backup"):
                 for role, identity in item["receipts"].items():
-                    self.fresh_receipt(identity, role)
+                    if identity:
+                        self.fresh_receipt(identity, role)
             if item["old_wg"] is not None:
                 require(self.wg_path.read_text() == item["old_wg"], "wireguard_drift")
             candidate = self.state / (change_id + ".candidate.yaml")
@@ -766,9 +799,10 @@ class Engine:
             for name in ("chatgpt.com", "api.openai.com"):
                 result = self.api("/dns/query?" + urllib.parse.urlencode({"name": name, "type": "A"}))
                 require(result.get("Status") == 0 and result.get("Answer"), "dns_check_failed")
-            if item["profile"] == "switch_primary":
+            if item["profile"] in ('switch_primary', 'switch_backup'):
+                preferred = 'primary' if item['profile'] == 'switch_primary' else 'backup'
                 for name in FALLBACKS:
-                    require(self.group(name).get("now") == SELECTORS["primary"], "primary_not_selected_yet")
+                    require(self.group(name).get('now') == SELECTORS[preferred], preferred + '_not_selected_yet')
         with self.global_lock():
             item = self.load(change_id, "change")
             require(item["phase"] == "pending" and self.clock() < item["deadline"], "guard_expired")

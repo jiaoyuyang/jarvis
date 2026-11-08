@@ -8,7 +8,7 @@ from typing import Literal
 from mcp.types import ToolAnnotations
 
 HELPER = "/usr/local/sbin/jarvis-network-ops"
-VERSION = "1.1.5"
+VERSION = "1.2.0"
 
 
 def hints(read_only=False, destructive=False, idempotent=False, open_world=False):
@@ -63,12 +63,13 @@ def register_tools(mcp):
         return invoke("probe", provider=provider, offset=offset, limit=limit, timeout_ms=timeout_ms)
 
     @mcp.tool(annotations=hints(open_world=True))
-    def prepare_network_change(profile: Literal["switch_primary", "stabilize_dns", "persist_wireguard"],
+    def prepare_network_change(profile: Literal["switch_primary", "switch_backup", "stabilize_dns", "persist_wireguard"],
                                primary_receipt: str = "", backup_receipt: str = "") -> dict:
         """Prepare a reviewable plan, no live traffic change.
 
         switch_primary needs successful primary+backup receipts <=180s old; keeps direct
-        backup in both fallback groups. stabilize_dns preserves bootstrap and restores
+        backup in both fallback groups. switch_backup needs a fresh successful backup
+        receipt and prefers it without requiring a healthy primary. stabilize_dns preserves bootstrap and restores
         the configured provider's allowlisted node DNS via backup when applicable.
         persist_wireguard only mirrors existing public host routes.
         """
