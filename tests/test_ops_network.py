@@ -275,6 +275,19 @@ class NetworkTests(unittest.TestCase):
         inline='dns: {enable: true}\n'
         self.assertIn('new',engine.yaml.safe_load(engine.yaml_mapping_update(inline,('dns',),{'new':1}))['dns'])
 
+    def test_block_collections_keep_the_separator_before_following_keys(self):
+        text='dns:\n  prefer-h3: true\n  fallback:\n    - https://old.example/query\n  respect-rules: true\nsecret: SECRET_SENTINEL\n'
+        values={'prefer-h3':False,'fallback':['https://new.example/query'],
+                'proxy-server-nameserver-policy':{'cn.bing.com':['https://custom.tizimao.net/inst#backup']}}
+        changed=engine.yaml_mapping_update(text,('dns',),values)
+        data=engine.yaml.safe_load(changed)
+        self.assertTrue(data['dns']['respect-rules'])
+        self.assertEqual(data['dns']['fallback'],values['fallback'])
+        self.assertTrue(changed.endswith('secret: SECRET_SENTINEL\n'))
+        nested='dns:\n  policy:\n    host.example:\n      - 1.1.1.1\n  enable: true\n'
+        changed=engine.yaml_patch(nested,[(('dns','policy'),{'new.example':['8.8.8.8']})])
+        self.assertTrue(engine.yaml.safe_load(changed)['dns']['enable'])
+
     def test_subscription_template_is_pinned_and_rejects_untrusted_resolvers(self):
         with mock.patch.object(engine.urllib.request,'build_opener') as builder:
             for url in ('http://web.laddercat.net/subscribe/'+'a'*32, 'https://evil.example/subscribe/'+'a'*32,
