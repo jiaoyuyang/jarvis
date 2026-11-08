@@ -24,7 +24,7 @@ import uuid
 
 import yaml
 
-VERSION = "1.1.3"
+VERSION = "1.1.4"
 CONFIG = Path("/etc/mihomo/config.yaml")
 WIREGUARD = Path("/etc/wireguard/wg0.conf")
 STATE = Path("/var/lib/jarvis-ops-network")
@@ -560,6 +560,17 @@ class Engine:
                 for name in PRIMARY_NODE_DOMAINS:
                     policy[name] = [r + '#' + SELECTORS['backup'] for r in resolvers]
                 updates['proxy-server-nameserver-policy'] = policy
+                # Keep the repaired provider on one explicit leaf. Its previous
+                # URL-test selector can include unrelated providers and may move
+                # the management tunnel before the client can confirm this plan.
+                require(self.config.get('profile', {}).get('store-selected') is True,
+                        'selected_cache_not_enabled')
+                members = self.group(SELECTORS['primary']).get('all', [])
+                candidates = [name for name in ('JP 日本｜中转 01', 'JP 日本｜中转 02') if name in members]
+                require(candidates, 'supported_primary_leaf_missing')
+                target['primary'] = candidates[0]
+                summary['target_selectors'] = target.copy()
+                summary['selector_scope'] = 'Pin the primary candidate; fallback remains automatic and transport verification is required.'
                 summary['primary_node_dns'] = {'domains': sorted(PRIMARY_NODE_DOMAINS),
                     'resolvers': resolvers, 'via': SELECTORS['backup'], 'source_sha256': digest(url.encode()),
                     'scope': 'node domains only; global bootstrap, credentials, SNI, routes and backup unchanged'}

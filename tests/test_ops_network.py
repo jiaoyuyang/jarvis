@@ -241,6 +241,8 @@ class NetworkTests(unittest.TestCase):
         self.config.write_text(text)
         self.e.config=engine.yaml.safe_load(text)
         self.controller.groups[engine.SELECTORS['backup']]['alive']=True
+        self.controller.groups[engine.SELECTORS['primary']]['all'] += ['JP 日本｜中转 01', 'JP 日本｜中转 02']
+        original_selectors = self.e.selected()
         with mock.patch.object(self.e,'primary_dns_template',return_value=list(engine.PRIMARY_DNS_RESOLVERS)):
             plan=self.e.prepare('stabilize_dns')
         self.assertEqual(self.config.read_text(),text)
@@ -254,10 +256,14 @@ class NetworkTests(unittest.TestCase):
         for domain in engine.PRIMARY_NODE_DOMAINS:
             self.assertEqual(candidate['dns']['proxy-server-nameserver-policy'][domain],
                              [u+'#一元日本01专线' for u in engine.PRIMARY_DNS_RESOLVERS])
+        self.assertEqual(record['new_selectors']['primary'], 'JP 日本｜中转 01')
+        self.assertEqual(plan['summary']['target_selectors'], record['new_selectors'])
         self.e.apply(plan['id'])
+        self.assertEqual(self.e.selected()['primary'], 'JP 日本｜中转 01')
         self.assertIn(('/cache/dns/flush','POST',None),self.controller.calls)
         self.e.rollback(plan['id'])
         self.assertEqual(self.config.read_text(),text)
+        self.assertEqual(self.e.selected(), original_selectors)
         with mock.patch.object(self.e,'primary_dns_template',return_value=list(engine.PRIMARY_DNS_RESOLVERS)):
             failed=self.e.prepare('stabilize_dns')
         with mock.patch.object(self.e,'flush_dns_cache',return_value=False):
@@ -265,6 +271,23 @@ class NetworkTests(unittest.TestCase):
                 self.e.apply(failed['id'])
         self.assertEqual(self.e.status(failed['id'])['phase'],'rolled_back')
         self.assertEqual(self.config.read_text(),text)
+
+    def test_dns_repair_never_pins_an_unknown_primary_candidate(self):
+        text = CONFIG + 'proxy-providers:\n  梯子猫订阅:\n    url: https://web.laddercat.net/subscribe/' + 'a'*32 + '\n'
+        self.config.write_text(text)
+        self.e.config = engine.yaml.safe_load(text)
+        self.controller.groups[engine.SELECTORS['backup']]['alive'] = True
+        original = self.e.selected()
+        with mock.patch.object(self.e, 'primary_dns_template', return_value=list(engine.PRIMARY_DNS_RESOLVERS)):
+            with self.assertRaisesRegex(engine.OperationError, 'supported_primary_leaf_missing'):
+                self.e.prepare('stabilize_dns')
+            self.assertEqual(self.config.read_text(), text)
+            self.assertEqual(self.e.selected(), original)
+            self.assertFalse(any(c[1] == 'PUT' for c in self.controller.calls))
+            self.controller.groups[engine.SELECTORS['primary']]['all'].append('JP 日本｜中转 02')
+            plan = self.e.prepare('stabilize_dns')
+            self.assertEqual(plan['summary']['target_selectors']['primary'], 'JP 日本｜中转 02')
+            self.assertEqual(self.e.selected(), original)
 
     def test_mapping_insert_preserves_comments_and_other_values(self):
         text='dns:\n  # keep DNS comment\n  enable: true\nsecret: SECRET_SENTINEL\n'
