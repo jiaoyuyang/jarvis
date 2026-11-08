@@ -11,7 +11,7 @@ JSON 参数，并通过 PID 1 创建独立 **service**（不是继承调用环�
   写目录仅网络状态、Mihomo 与 WireGuard 配置；地址族包含 AF_NETLINK。
   仅保留 CHOWN、DAC_OVERRIDE、FOWNER、NET_ADMIN 四项能力。
 - 升级 worker：独立异步任务，另允许固定安装目录、固定 helper/sudoers 目录与
-  安装事务目录写入，额外允许 SETUID、SETGID、SYS_RESOURCE 以验证真实服务账号。
+  安装事务目录写入，额外允许 SETUID、SETGID 以验证真实服务账号。
   不等待自身隧道重启；返回 `queued` 后必须查安装与升级回执，不能当作部署成功。
 - 版本仍是三个固定文件、固定 GitHub 仓库/current main 与包哈希校验。
   helper 不接受命令、服务名、路径、URL、systemd 属性或 shell。
@@ -26,7 +26,8 @@ JSON 参数，并通过 PID 1 创建独立 **service**（不是继承调用环�
 
 CI 在一次性 VM 上以 nobody 复现只读系统目录和禁用 NETLINK 的调用环境，检查
 sudo 固定入口、worker 的 NETLINK、只允许目标目录写入、异步任务在调用单元退出
-后存活，以及升级环境中的降权和文件属主保留。该集成测试不可在生产机执行。
+后存活，以及升级环境中的直接 UID/GID 降权和文件属主保留。验证进程不依赖 PAM
+登录会话。该集成测试不可在生产机执行。
 
 在原来的 Ops MCP 服务上增加 11 个专用工具。保留原有工具、认证、隧道和
 Jarvis 容器边界，不开放任意 Shell、任意 URL、原始 YAML 写入或任意文件路径。

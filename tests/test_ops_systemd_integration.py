@@ -50,7 +50,7 @@ print(json.dumps({'ok':True,'result':{'netlink':True,'outside_readonly':outside_
         self.installer.write_text('''import time,subprocess,os
 from pathlib import Path
 time.sleep(3)
-r=subprocess.run(['runuser','-u','nobody','--','/usr/bin/python3','-c','import os;print(os.geteuid())'],capture_output=True,text=True)
+r=subprocess.run(['/usr/bin/python3','-c','import os;print(os.geteuid())'],user=65534,group=65534,extra_groups=[],capture_output=True,text=True)
 assert r.returncode==0, r.stderr
 assert r.stdout.strip()=='65534'
 p=Path(''' + repr(str(self.etc / 'async-survived')) + ''')

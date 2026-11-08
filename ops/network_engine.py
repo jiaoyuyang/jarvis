@@ -113,7 +113,7 @@ def worker_command(unit, upgrade=False):
     paths = UPGRADE_PATHS if upgrade else WORKER_PATHS
     caps = "CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_NET_ADMIN"
     if upgrade:
-        caps += " CAP_SETUID CAP_SETGID CAP_SYS_RESOURCE"
+        caps += " CAP_SETUID CAP_SETGID"
     properties = ("Type=exec", "User=root", "UMask=0077", "NoNewPrivileges=yes",
                   "ProtectSystem=strict", "ProtectHome=read-only", "PrivateTmp=yes",
                   "RestrictSUIDSGID=yes", "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK",

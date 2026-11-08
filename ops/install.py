@@ -43,8 +43,15 @@ def require(ok, code):
         raise RuntimeError(code)
 
 
-def run(args, timeout=20):
-    result = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+def actor_options(username):
+    account = pwd.getpwnam(username)
+    return {"user": account.pw_uid, "group": account.pw_gid,
+            "extra_groups": os.getgrouplist(username, account.pw_gid)}
+
+
+def run(args, timeout=20, actor=None):
+    options = actor_options(actor) if actor else {}
+    result = subprocess.run(args, capture_output=True, text=True, timeout=timeout, **options)
     require(result.returncode == 0, "host_preflight_failed")
     return result.stdout.strip()
 
@@ -283,8 +290,9 @@ def _verify(identity):
         # Execute the bridge as the actual service account, not merely as root.
         argv = [str(WRAPPER), "snapshot"]
         if info["service_user"] != "root":
-            argv = ["runuser", "-u", info["service_user"], "--", "sudo", "-n", *argv]
-        result = subprocess.run(argv, input="{}", capture_output=True, text=True, timeout=35)
+            argv = ["sudo", "-n", *argv]
+        result = subprocess.run(argv, input="{}", capture_output=True, text=True, timeout=35,
+                                **actor_options(info["service_user"]))
         response = json.loads(result.stdout)
         require(result.returncode == 0 and response.get("ok"), "privileged_bridge_check_failed")
         snapshot = response.get("result", {})
@@ -393,9 +401,7 @@ def _install_locked(commit, expected, upgrade=False, request_id=None, release=No
         # Public SDK registry inspection verifies original and new tools can coexist.
         test = registry_check_program(SERVER, mcp_name, TOOL_NAMES | registered_names(source, mcp_name))
         test_argv = [str(VENV_PYTHON), "-c", test]
-        if user != "root":
-            test_argv = ["runuser", "-u", user, "--", *test_argv]
-        run(test_argv, timeout=25)
+        run(test_argv, timeout=25, actor=user)
         # Return the tool result before the transport is restarted.
         reload_unit = "jarvis-ops-reload-" + identity
         run(["systemd-run", "--quiet", "--unit=" + reload_unit, "--on-active=3s",

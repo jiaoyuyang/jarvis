@@ -545,9 +545,11 @@ class InstallerLifecycleTests(unittest.TestCase):
         installer.SERVER.write_text(SERVER)
         installer.VENV_PYTHON.write_text("fixture")
         self.calls = []
+        self.actors = []
         self.timers = set()
-        def run(argv, timeout=20):
+        def run(argv, timeout=20, actor=None):
             self.calls.append(argv)
+            self.actors.append((argv, actor))
             if argv[0] == "systemd-run":
                 self.timers.add(next(s.split("=", 1)[1] for s in argv if s.startswith("--unit=")) + ".timer")
             if argv[:2] == ["systemctl", "is-active"]: return "active"
@@ -565,6 +567,8 @@ class InstallerLifecycleTests(unittest.TestCase):
         patch.start(); self.addCleanup(patch.stop)
         patch = mock.patch.object(installer, "service_actor", return_value="jarvis-ops")
         patch.start(); self.addCleanup(patch.stop)
+        patch = mock.patch.object(installer, "actor_options", return_value={'user': 1001, 'group': 1001, 'extra_groups': []})
+        patch.start(); self.addCleanup(patch.stop)
         payload = {name: (ROOT / "ops" / name).read_bytes() for name in installer.FILES}
         patch = mock.patch.object(installer, "fetch_release", return_value=(payload, {"version": "test"}))
         patch.start(); self.addCleanup(patch.stop)
@@ -578,7 +582,7 @@ class InstallerLifecycleTests(unittest.TestCase):
         self.assertIn("def existing_tool", installer.SERVER.read_text())
         self.assertIn("_jarvis_network_register(app)", installer.SERVER.read_text())
         checks = [c for c in self.calls if "-c" in c and "ops_check" in c[-1]]
-        self.assertEqual(checks[0][:4], ["runuser", "-u", "jarvis-ops", "--"])
+        self.assertEqual(next(actor for argv, actor in self.actors if argv == checks[0]), 'jarvis-ops')
         self.assertIn("python3 -I", installer.WRAPPER.read_text())
         self.assertIn('--broker "$@"', installer.WRAPPER.read_text())
 
@@ -608,7 +612,9 @@ class InstallerLifecycleTests(unittest.TestCase):
             'cap_net_admin': True, 'no_new_privileges': True, 'cgroup': '/system.slice/jarvis-ops-task-fixture.service'}}}))
         with mock.patch.object(installer.subprocess, "run", return_value=ok) as run:
             installer.verify(result["installation_id"])
-        self.assertEqual(run.call_args.args[0][:5], ["runuser", "-u", "jarvis-ops", "--", "sudo"])
+        self.assertEqual(run.call_args.args[0][:2], ["sudo", "-n"])
+        self.assertEqual(run.call_args.kwargs['user'], 1001)
+        self.assertEqual(run.call_args.kwargs['group'], 1001)
         _, record = installer.record(result["installation_id"])
         self.assertEqual(record["phase"], "committed")
         current = installer.SERVER.read_text()
