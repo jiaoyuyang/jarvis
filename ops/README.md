@@ -2,8 +2,8 @@
 
 ## 1.1 执行隔离与旧版迁移
 
-现网隧道使用 `ProtectSystem=full`，且地址族未包含 AF_NETLINK。sudo 改变 UID
-不能移除继承的只读挂载与地址族过滤。因此 root helper 现在只接受固定动作与
+当隧道具有文件系统或地址族隔离时，sudo 改变 UID
+不能移除继承的限制。因此 root helper 现在只接受固定动作与
 JSON 参数，并通过 PID 1 创建独立 **service**（不是继承调用环境的 scope）。
 不修改隧道现有 unit、drop-in 或旧工具的 sudo 规则。
 
