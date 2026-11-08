@@ -11,7 +11,7 @@ FILES = ("network_engine.py", "mcp_extension.py", "install.py")
 def manifest(folder):
     hashes = {name: hashlib.sha256((folder / name).read_bytes()).hexdigest() for name in FILES}
     package = hashlib.sha256("".join(name + "\0" + hashes[name] + "\n" for name in FILES).encode()).hexdigest()
-    return {"version": "1.1.2", "package_sha256": package, "sha256": hashes}
+    return {"version": "1.1.3", "package_sha256": package, "sha256": hashes}
 
 
 if __name__ == "__main__":
