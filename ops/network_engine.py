@@ -25,7 +25,7 @@ import uuid
 
 import yaml
 
-VERSION = "1.4.0"
+VERSION = "1.4.1"
 CONFIG = Path("/etc/mihomo/config.yaml")
 WIREGUARD = Path("/etc/wireguard/wg0.conf")
 STATE = Path("/var/lib/jarvis-ops-network")
@@ -59,6 +59,10 @@ class HostCommandError(OperationError):
         # Classify only known messages; never return raw command output/arguments.
         if "operation not permitted" in stderr.lower() or "permission denied" in stderr.lower():
             self.details["reason"] = "permission_denied"
+        elif 'read-only file system' in stderr.lower():
+            self.details['reason'] = 'read_only_filesystem'
+        elif 'unsupported_adapter_source_no_changes' in stderr or 'unsupported_client_source_no_changes' in stderr:
+            self.details['reason'] = 'patch_source_mismatch'
         elif "no such device" in stderr.lower() or "does not exist" in stderr.lower():
             self.details["reason"] = "interface_not_found"
 
@@ -1113,6 +1117,9 @@ class Engine:
             identity = uuid.uuid4().hex
             build = self.state / ('client-build-' + identity)
             build.mkdir(mode=0o700)
+            docker_config = self.state / ('client-docker-config-' + identity)
+            docker_config.mkdir(mode=0o700)
+            atomic(docker_config / 'config.json', json.dumps({'cliPluginsExtraDirs': ['/root/.docker/cli-plugins']}).encode())
             base_tag = 'jarvis:client-base-' + old_image[7:19]
             candidate_tag = 'jarvis:client-repair-' + CLIENT_REPAIR_PATCH_SHA256[:12]
             atomic(build / 'patch.py', patch_bytes, 0o644)
@@ -1132,7 +1139,12 @@ class Engine:
                              HELPER, 'client-repair-rollback', identity])
                 require(self.runner(['systemctl', 'is-active', timer + '.timer']) == 'active', 'guard_not_active')
                 self.runner(['docker', 'image', 'tag', old_image, base_tag])
-                self.runner(['docker', 'build', '--network', 'none', '--pull=false', '-t', candidate_tag, str(build)], timeout=45)
+                item['summary']['stage'] = 'building'
+                self.save(item)
+                self.runner(['docker', '--config', str(docker_config), 'build', '--network', 'none', '--pull=false',
+                             '-t', candidate_tag, str(build)], timeout=45)
+                item['summary']['stage'] = 'candidate_verification'
+                self.save(item)
                 candidate_image = json.loads(self.runner(['docker', 'image', 'inspect', candidate_tag]))[0]['Id']
                 candidate_probe = self.image_probe(candidate_tag)
                 require(candidate_probe.get('client_marker') and candidate_probe.get('adapter_marker')
@@ -1140,10 +1152,15 @@ class Engine:
                 require(self.clock() < item['deadline'] and self.compose_state()[2] == config_hash, 'repair_pre_cutover_drift')
                 item.update(candidate_image=candidate_image, candidate_probe=candidate_probe)
                 self.save(item)
+                item['summary']['stage'] = 'cutover'
+                self.save(item)
                 self.runner(['docker', 'image', 'tag', candidate_image, image])
                 self.runner(compose + ['up', '-d', '--no-build', '--no-deps', '--force-recreate', 'jarvis'], timeout=25)
                 self.wait_jarvis_health(candidate_image)
-            except Exception:
+            except Exception as error:
+                item['summary']['failed_stage'] = item['summary'].get('stage', 'guard_setup')
+                item['summary']['failure'] = error.details if isinstance(error, HostCommandError) else {'error': str(error) if isinstance(error, OperationError) else type(error).__name__}
+                self.save(item)
                 self._client_repair_restore(item)
                 raise
             return self.public(item)

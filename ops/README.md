@@ -1,5 +1,7 @@
 # Jarvis Ubuntu Ops 网络扩展
 
+1.4.1 为镜像构建提供固定状态目录下的私有 Docker/Buildx 配置，兼容只读 home 隔离；保留失败阶段及脱敏错误分类。CI 在同样的只读 home、严格文件系统及能力边界下实际构建派生镜像。
+
 1.4.0 增加固定 Codex 客户端修复组件：只从当前镜像派生、校验两个生产源码哈希、保留 CLI 版本；环境和挂载必须与 Compose 一致。应用前建立独立 180 秒旧镜像恢复任务，确认时验证源码、容器健康及同适配器生成/恢复。宿主仓库、.env 与代理配置不写入。详见 [CODEX_CLIENT_REPAIR.md](CODEX_CLIENT_REPAIR.md)。
 
 1.3.1 为未刷新工具清单的客户端保留显式兼容选项：`ops_extension_status(include_runtime=true)` 读取同一固定诊断；`model_smoke_test(mode="harness")` 执行同一适配器测试。默认调用行为保持，选项不接受脚本、路径或提示词。
