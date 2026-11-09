@@ -25,7 +25,7 @@ import uuid
 
 import yaml
 
-VERSION = "1.3.1"
+VERSION = "1.4.0"
 CONFIG = Path("/etc/mihomo/config.yaml")
 WIREGUARD = Path("/etc/wireguard/wg0.conf")
 STATE = Path("/var/lib/jarvis-ops-network")
@@ -43,6 +43,7 @@ TESTS = (("https://www.gstatic.com/generate_204", 204),
          ("https://api.openai.com/v1/models", 401))
 ID = re.compile(r"[0-9a-f]{32}")
 PRIMARY_DNS_RESOLVERS = ("https://custom.tizimao.net/inst", "https://custom-us.ladder-cat.com/inst")
+CLIENT_REPAIR_PATCH_SHA256 = 'ca7b3cebc56d5815ccc49f08e9dce9d3caf4e76a8259402fa2c2cf207864ac6a'
 PRIMARY_NODE_DOMAINS = {"cn.bing.com", "tw1.apple.com", "tw2.apple.com"}
 
 
@@ -133,11 +134,11 @@ def broker(args, raw):
     require(1 <= len(args) <= 2 and len(raw) <= 65536, "invalid_command")
     action = args[0]
     allowed = {"snapshot", "probe", "prepare", "apply", "confirm", "rollback", "status", "logs",
-               "model-smoke", "runtime-diagnostics", "harness-smoke", "extension-status", "upgrade", "rollback-auto"}
+               "model-smoke", "runtime-diagnostics", "harness-smoke", "extension-status", "upgrade", "rollback-auto", "client-repair", "client-repair-rollback"}
     require(action in allowed, "unsupported_operation")
     data = json.loads(raw or b"{}")
     require(isinstance(data, dict), "invalid_request")
-    if action == "rollback-auto":
+    if action in ("rollback-auto", "client-repair-rollback"):
         require(len(args) == 2 and ID.fullmatch(args[1]) and not data, "invalid_command")
     else:
         require(len(args) == 1, "invalid_command")
@@ -997,7 +998,175 @@ class Engine:
         return {"version": VERSION, "arbitrary_shell": False, "rollback_seconds": 120,
                 "execution": "independent_systemd_service",
                 "upgrade_request": upgrade,
+                "client_repair": self.latest_client_repair(),
                 "installation": {key: install.get(key) for key in ("id", "phase", "commit", "package_sha256", "request_id")}}
+
+    def latest_client_repair(self):
+        records = []
+        for path in self.state.glob('*.json'):
+            value = json.loads(path.read_text())
+            if value.get('kind') == 'client-repair':
+                records.append(value)
+        return self.public(max(records, key=lambda r: r['created_at'])) if records else None
+
+    def compose_state(self):
+        argv = ['docker', 'compose', '--project-directory', '/home/ubuntu/jarvis',
+                '-f', '/home/ubuntu/jarvis/docker-compose.yml']
+        data = json.loads(self.runner(argv + ['config', '--format', 'json']))
+        return argv, data, digest(json.dumps(data, sort_keys=True).encode())
+
+    def container_state(self):
+        value = json.loads(self.runner(['docker', 'inspect', 'jarvis']))
+        require(len(value) == 1, 'unexpected_container_inspection')
+        return value[0]
+
+    def image_probe(self, image=None):
+        script = "import hashlib,json,subprocess;from pathlib import Path;" \
+            "a=Path('/app/venv/lib/python3.11/site-packages/qwenpaw/harnesses/codex/app_server.py').read_bytes();" \
+            "b=Path('/app/venv/lib/python3.11/site-packages/qwenpaw/harnesses/codex/adapter.py').read_bytes();" \
+            "print(json.dumps({'client_sha256':hashlib.sha256(a).hexdigest(),'adapter_sha256':hashlib.sha256(b).hexdigest()," \
+            "'client_marker':b'JARVIS_CODEX_CLIENT_HEALTH_V1' in a,'adapter_marker':b'JARVIS_CODEX_PROCESS_EPOCH_V1' in b," \
+            "'cli':subprocess.check_output(['/app/venv/lib/python3.11/site-packages/codex_cli_bin/bin/codex','--version'],text=True).strip()}))"
+        argv = ['docker', 'exec', 'jarvis', '/app/venv/bin/python', '-c', script] if image is None else [
+            'docker', 'run', '--rm', '--network', 'none', '--read-only', '--cap-drop', 'ALL',
+            '--security-opt', 'no-new-privileges:true', '--tmpfs', '/tmp:rw,nosuid',
+            '--entrypoint', '/app/venv/bin/python', image, '-c', script]
+        return json.loads(self.runner(argv, timeout=20))
+
+    def wait_jarvis_health(self, image, seconds=45):
+        deadline = self.clock() + seconds
+        while self.clock() < deadline:
+            value = self.container_state()
+            require(value.get('Image') == image, 'container_image_drift')
+            if (value.get('State', {}).get('Health') or {}).get('Status') == 'healthy':
+                return
+            time.sleep(1)
+        raise OperationError('jarvis_health_timeout')
+
+    def client_repair(self, commit_sha, package_sha256, operation='apply', change_id=''):
+        require(isinstance(commit_sha, str) and re.fullmatch(r'[0-9a-f]{40}', commit_sha)
+                and isinstance(package_sha256, str) and re.fullmatch(r'[0-9a-f]{64}', package_sha256), 'invalid_repair_digest')
+        require(operation in ('apply', 'confirm', 'rollback'), 'invalid_repair_operation')
+        installed = self.extension_status()['installation']
+        require(installed.get('phase') == 'committed' and installed.get('commit') == commit_sha
+                and installed.get('package_sha256') == package_sha256, 'repair_requires_installed_reviewed_release')
+        if operation == 'rollback':
+            return self.client_repair_restore(change_id)
+        if operation == 'confirm':
+            item = self.load(change_id, 'client-repair')
+            require(item.get('commit') == commit_sha, 'repair_release_mismatch')
+            if item['phase'] == 'committed':
+                return self.public(item)
+            require(item['phase'] == 'pending' and self.clock() < item['deadline'], 'repair_not_pending')
+            require(self.compose_state()[2] == item['compose_hash'], 'compose_configuration_drift')
+            require(self.container_state().get('Image') == item['candidate_image'], 'container_image_drift')
+            require(self.image_probe() == item['candidate_probe'], 'client_source_drift')
+            check = self.harness_smoke()
+            require(check.get('ok') is True, 'installed_harness_smoke_failed')
+            with self.global_lock():
+                item = self.load(change_id, 'client-repair')
+                require(item['phase'] == 'pending' and self.clock() < item['deadline'], 'repair_guard_expired')
+                self.wait_jarvis_health(item['candidate_image'], seconds=3)
+                require(self.compose_state()[2] == item['compose_hash'] and self.image_probe() == item['candidate_probe'], 'repair_verification_drift')
+                item.update(phase='committed', verification={'isolated_harness': check, 'dingtalk_acceptance': 'pending'})
+                self.save(item)
+                self.runner(['systemctl', 'stop', item['timer'] + '.timer'])
+            return self.public(item)
+        require(not change_id, 'unexpected_change_id')
+        with self.global_lock():
+            require(not self.active_change(), 'another_change_pending')
+            compose, spec, config_hash = self.compose_state()
+            current = self.container_state()
+            service = spec.get('services', {}).get('jarvis') or {}
+            image = current.get('Config', {}).get('Image', '')
+            require(re.fullmatch(r'jarvis:[A-Za-z0-9_.-]{1,180}', image) and service.get('image') == image,
+                    'unsupported_image_reference')
+            old_image = current.get('Image', '')
+            require(re.fullmatch(r'sha256:[0-9a-f]{64}', old_image), 'unsupported_image_id')
+            actual_env = dict(value.split('=', 1) for value in current.get('Config', {}).get('Env', []) if '=' in value)
+            require(all(actual_env.get(k) == str(v) for k, v in (service.get('environment') or {}).items()),
+                    'compose_environment_drift')
+            require(service.get('network_mode') == current.get('HostConfig', {}).get('NetworkMode') == 'host', 'compose_network_drift')
+            mounts = {v['Destination']: v for v in current.get('Mounts', [])}
+            for volume in service.get('volumes', []):
+                actual = mounts.get(volume.get('target'), {})
+                require(volume.get('type') == actual.get('Type') == 'bind' and volume.get('source') == actual.get('Source')
+                        and bool(volume.get('read_only', False)) == (not actual.get('RW', True)), 'compose_mount_drift')
+            image_metadata = json.loads(self.runner(['docker', 'image', 'inspect', image]))[0]
+            require(image_metadata['Id'] == old_image, 'image_alias_drift')
+            expected_env = dict(v.split('=', 1) for v in image_metadata.get('Config', {}).get('Env', []) if '=' in v)
+            expected_env.update({k: str(v) for k, v in (service.get('environment') or {}).items()})
+            require(actual_env == expected_env, 'unmanaged_container_environment')
+            require(set(mounts) == {v.get('target') for v in service.get('volumes', [])}, 'unmanaged_container_mounts')
+            require(sorted(current.get('HostConfig', {}).get('CapDrop') or []) == sorted(service.get('cap_drop') or [])
+                    and sorted(current.get('HostConfig', {}).get('SecurityOpt') or []) == sorted(service.get('security_opt') or []),
+                    'compose_security_drift')
+            probe = self.image_probe()
+            require(probe.get('client_sha256') == 'e341ed34916909a99ad8ea54e5bbf5396327ce8c11c498491d8265b6b4a32333'
+                    and probe.get('adapter_sha256') == 'a92640b5180613fd831d95190bc66e7e89cbe87d2e40de200a99370485867845',
+                    'unsupported_live_client_source')
+            url = 'https://raw.githubusercontent.com/jiaoyuyang/jarvis/' + commit_sha + '/patches/patch_qwenpaw_codex_client_health.py'
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({'https': 'http://127.0.0.1:7890'}), NoRedirect())
+            with opener.open(url, timeout=10) as response:
+                patch_bytes = response.read(65537)
+            require(len(patch_bytes) <= 65536 and digest(patch_bytes) == CLIENT_REPAIR_PATCH_SHA256, 'repair_patch_digest_mismatch')
+            identity = uuid.uuid4().hex
+            build = self.state / ('client-build-' + identity)
+            build.mkdir(mode=0o700)
+            base_tag = 'jarvis:client-base-' + old_image[7:19]
+            candidate_tag = 'jarvis:client-repair-' + CLIENT_REPAIR_PATCH_SHA256[:12]
+            atomic(build / 'patch.py', patch_bytes, 0o644)
+            dockerfile = ('FROM ' + base_tag + '\nCOPY patch.py /opt/jarvis/patches/patch_qwenpaw_codex_client_health.py\n'
+                          'RUN /app/venv/bin/python /opt/jarvis/patches/patch_qwenpaw_codex_client_health.py\n')
+            atomic(build / 'Dockerfile', dockerfile.encode(), 0o644)
+            timer = 'jarvis-client-guard-' + identity
+            item = {'id': identity, 'kind': 'client-repair', 'profile': 'codex-client', 'phase': 'pending',
+                    'created_at': self.clock(), 'deadline': self.clock() + 180, 'timer': timer,
+                    'old_image': old_image, 'image_alias': image, 'compose_hash': config_hash, 'commit': commit_sha,
+                    'summary': {'scope': 'Derived running image, fixed client/adapter patch only; host checkout/env/proxy untouched',
+                                'cli': probe.get('cli'), 'patch_sha256': CLIENT_REPAIR_PATCH_SHA256}}
+            self.save(item)
+            try:
+                self.runner(['systemd-run', '--quiet', '--unit=' + timer, '--on-active=180s', '--timer-property=AccuracySec=1s',
+                             '--property=Type=oneshot', '--property=Restart=on-failure', '--property=RestartSec=10s',
+                             HELPER, 'client-repair-rollback', identity])
+                require(self.runner(['systemctl', 'is-active', timer + '.timer']) == 'active', 'guard_not_active')
+                self.runner(['docker', 'image', 'tag', old_image, base_tag])
+                self.runner(['docker', 'build', '--network', 'none', '--pull=false', '-t', candidate_tag, str(build)], timeout=45)
+                candidate_image = json.loads(self.runner(['docker', 'image', 'inspect', candidate_tag]))[0]['Id']
+                candidate_probe = self.image_probe(candidate_tag)
+                require(candidate_probe.get('client_marker') and candidate_probe.get('adapter_marker')
+                        and candidate_probe.get('cli') == probe.get('cli'), 'candidate_image_verification_failed')
+                require(self.clock() < item['deadline'] and self.compose_state()[2] == config_hash, 'repair_pre_cutover_drift')
+                item.update(candidate_image=candidate_image, candidate_probe=candidate_probe)
+                self.save(item)
+                self.runner(['docker', 'image', 'tag', candidate_image, image])
+                self.runner(compose + ['up', '-d', '--no-build', '--no-deps', '--force-recreate', 'jarvis'], timeout=25)
+                self.wait_jarvis_health(candidate_image)
+            except Exception:
+                self._client_repair_restore(item)
+                raise
+            return self.public(item)
+
+    def _client_repair_restore(self, item):
+        require(self.compose_state()[2] == item['compose_hash'], 'restore_compose_drift')
+        current = self.container_state()
+        require(current.get('Image') in (item['old_image'], item.get('candidate_image')), 'restore_container_drift')
+        self.runner(['docker', 'image', 'tag', item['old_image'], item['image_alias']])
+        if current.get('Image') != item['old_image']:
+            compose = self.compose_state()[0]
+            self.runner(compose + ['up', '-d', '--no-build', '--no-deps', '--force-recreate', 'jarvis'], timeout=25)
+            self.wait_jarvis_health(item['old_image'])
+        item['phase'] = 'rolled_back'
+        self.save(item)
+        self.runner(['systemctl', 'stop', item['timer'] + '.timer'])
+
+    def client_repair_restore(self, change_id):
+        with self.global_lock():
+            item = self.load(change_id, 'client-repair')
+            if item['phase'] == 'pending':
+                self._client_repair_restore(item)
+            return self.public(item)
 
     def application_logs(self, lines=80):
         bounded_int(lines, 1, 160)
@@ -1007,7 +1176,7 @@ class Engine:
         data = json.loads(raw)
         # Return operational errors only, not ordinary chat content.
         selected = {name: [redact(line) for line in content if re.search(
-            r"error|exception|traceback|timeout|failed|card.*final|turn.*completed", line, re.I)]
+            r"error|exception|traceback|timeout|failed|card.*final|turn.*completed|codex.*rpc", line, re.I)]
             for name, content in data.items()}
         return {"logs": selected, "scope": "recent matching application log lines"}
 
@@ -1077,9 +1246,9 @@ def worker_main():
     require(len(sys.argv) in (2, 3), "invalid_command")
     engine = Engine()
     action = sys.argv[1]
-    if action == "rollback-auto":
+    if action in ("rollback-auto", "client-repair-rollback"):
         require(len(sys.argv) == 3, "invalid_command")
-        return engine.rollback(sys.argv[2], automatic=True)
+        return engine.rollback(sys.argv[2], automatic=True) if action == "rollback-auto" else engine.client_repair_restore(sys.argv[2])
     require(len(sys.argv) == 2, "invalid_command")
     raw = sys.stdin.buffer.read(65537)
     require(len(raw) <= 65536, "request_too_large")
@@ -1089,6 +1258,7 @@ def worker_main():
                "apply": engine.apply, "confirm": engine.confirm, "rollback": engine.rollback,
                "status": engine.status, "logs": engine.application_logs, "model-smoke": engine.model_smoke,
                "runtime-diagnostics": engine.runtime_diagnostics, "harness-smoke": engine.harness_smoke,
+               "client-repair": engine.client_repair,
                "extension-status": engine.extension_status}
     require(action in methods, "unsupported_operation")
     return methods[action](**data)

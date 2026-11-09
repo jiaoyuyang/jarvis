@@ -181,6 +181,90 @@ class NetworkTests(unittest.TestCase):
     def switch(self):
         return self.e.prepare("switch_primary", *self.receipts())["id"]
 
+    def repair_fixture(self, build_failure=False):
+        old, candidate = 'sha256:' + '1'*64, 'sha256:' + '2'*64
+        state = {'image': old, 'alias': old, 'calls': []}
+        service = {'image': 'jarvis:fixture', 'environment': {'TEST': 'SECRET_SENTINEL'},
+                   'network_mode': 'host', 'volumes': [], 'cap_drop': ['ALL'], 'security_opt': []}
+        self.e.extension_status = mock.Mock(return_value={'installation': {
+            'phase': 'committed', 'commit': 'a'*40, 'package_sha256': 'b'*64}})
+        self.e.compose_state = mock.Mock(return_value=(['docker', 'compose'], {'services': {'jarvis': service}}, 'c'*64))
+        self.e.container_state = mock.Mock(side_effect=lambda: {'Image': state['image'], 'Mounts': [],
+            'Config': {'Image': 'jarvis:fixture', 'Env': ['TEST=SECRET_SENTINEL']},
+            'HostConfig': {'NetworkMode': 'host', 'CapDrop': ['ALL'], 'SecurityOpt': []},
+            'State': {'Health': {'Status': 'healthy'}}})
+        original_probe = {'client_sha256': 'e341ed34916909a99ad8ea54e5bbf5396327ce8c11c498491d8265b6b4a32333',
+            'adapter_sha256': 'a92640b5180613fd831d95190bc66e7e89cbe87d2e40de200a99370485867845', 'cli': 'codex-cli 0.162.1'}
+        repaired_probe = {'client_sha256': 'new-client', 'adapter_sha256': 'new-adapter', 'cli': 'codex-cli 0.162.1',
+            'client_marker': True, 'adapter_marker': True}
+        self.e.image_probe = mock.Mock(side_effect=lambda image=None: copy.deepcopy(
+            repaired_probe if image is not None or state['image'] == candidate else original_probe))
+        self.e.harness_smoke = mock.Mock(return_value={'ok': True})
+        base_runner = self.runner
+        def runner(argv, **kwargs):
+            state['calls'].append(argv)
+            if argv[:3] == ['docker', 'image', 'inspect']:
+                return json.dumps([{'Id': state['alias'] if argv[-1] == 'jarvis:fixture' else candidate, 'Config': {'Env': []}}])
+            if argv[:3] == ['docker', 'image', 'tag']:
+                self.assertTrue(base_runner.timers)
+                if argv[-1] == 'jarvis:fixture': state['alias'] = argv[-2]
+                return ''
+            if argv[:2] == ['docker', 'build']:
+                self.assertIn('none', argv)
+                if build_failure: raise engine.OperationError('fixture_build_failed')
+                return ''
+            if argv[:3] == ['docker', 'compose', 'up']:
+                self.assertIn('--no-build', argv)
+                state['image'] = state['alias']
+                return ''
+            return base_runner(argv, **kwargs)
+        self.e.runner = runner
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = (ROOT/'patches/patch_qwenpaw_codex_client_health.py').read_bytes()
+        opener = mock.Mock()
+        opener.open.return_value = response
+        return state, opener
+
+    def test_fixed_client_repair_confirm_preserves_version_and_requires_smoke(self):
+        state, opener = self.repair_fixture()
+        with mock.patch.object(engine.urllib.request, 'build_opener', return_value=opener):
+            pending = self.e.client_repair('a'*40, 'b'*64)
+        self.assertEqual(pending['phase'], 'pending')
+        self.assertEqual(state['image'], 'sha256:'+'2'*64)
+        self.assertNotIn('SECRET_SENTINEL', json.dumps(pending))
+        self.e.harness_smoke.return_value = {'ok': False}
+        with self.assertRaisesRegex(engine.OperationError, 'installed_harness_smoke_failed'):
+            self.e.client_repair('a'*40, 'b'*64, 'confirm', pending['id'])
+        self.assertTrue(self.runner.timers)
+        self.e.harness_smoke.return_value = {'ok': True}
+        result = self.e.client_repair('a'*40, 'b'*64, 'confirm', pending['id'])
+        self.assertEqual(result['phase'], 'committed')
+        self.assertFalse(self.runner.timers)
+        self.assertEqual(result['verification']['dingtalk_acceptance'], 'pending')
+        self.assertEqual(self.config.read_text(), CONFIG)
+
+    def test_client_repair_build_failure_restores_alias_before_cutover(self):
+        state, opener = self.repair_fixture(build_failure=True)
+        with mock.patch.object(engine.urllib.request, 'build_opener', return_value=opener):
+            with self.assertRaisesRegex(engine.OperationError, 'fixture_build_failed'):
+                self.e.client_repair('a'*40, 'b'*64)
+        self.assertEqual(state['image'], 'sha256:'+'1'*64)
+        self.assertEqual(state['alias'], 'sha256:'+'1'*64)
+        self.assertFalse(any(c[:3] == ['docker', 'compose', 'up'] for c in state['calls']))
+        self.assertEqual(self.e.latest_client_repair()['phase'], 'rolled_back')
+
+    def test_client_repair_rejects_unreviewed_release_and_restores_pending_image(self):
+        state, opener = self.repair_fixture()
+        with self.assertRaisesRegex(engine.OperationError, 'repair_requires_installed_reviewed_release'):
+            self.e.client_repair('f'*40, 'b'*64)
+        self.assertFalse(state['calls'])
+        with mock.patch.object(engine.urllib.request, 'build_opener', return_value=opener):
+            pending = self.e.client_repair('a'*40, 'b'*64)
+        result = self.e.client_repair('a'*40, 'b'*64, 'rollback', pending['id'])
+        self.assertEqual(result['phase'], 'rolled_back')
+        self.assertEqual(state['image'], 'sha256:'+'1'*64)
+        self.assertFalse(self.runner.timers)
+
     def test_runtime_diagnostics_uses_fixed_read_and_redacts_failed_errors(self):
         self.e.runner = mock.Mock(return_value=json.dumps({'failed_records': [
             {'error': 'token="HIDDEN" https://example.invalid/secret Bearer PRIVATE'}], 'settings': {'model': 'gpt-6.1-sol'}}))
@@ -909,6 +993,9 @@ class ExtensionTests(unittest.TestCase):
         with mock.patch.object(extension, 'invoke', return_value={'ok': True}) as invoke:
             app.tools['model_smoke_test']()
             invoke.assert_called_once_with('model-smoke')
+        with mock.patch.object(extension, 'invoke', return_value={'ok': True}) as invoke:
+            app.tools['upgrade_ops_extension']('a'*40, 'b'*64, component='codex-client', operation='confirm', change_id='c'*32)
+            invoke.assert_called_once_with('client-repair', commit_sha='a'*40, package_sha256='b'*64, operation='confirm', change_id='c'*32)
 
     def test_helper_has_no_shell_or_inherited_custom_command(self):
         fake = mock.Mock(returncode=0, stdout='{"ok":true,"result":{}}')
