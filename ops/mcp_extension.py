@@ -8,7 +8,7 @@ from typing import Literal
 from mcp.types import ToolAnnotations
 
 HELPER = "/usr/local/sbin/jarvis-network-ops"
-VERSION = "1.3.1"
+VERSION = "1.4.0"
 
 
 def hints(read_only=False, destructive=False, idempotent=False, open_world=False):
@@ -27,7 +27,7 @@ def invoke(action, **arguments):
     argv = [HELPER, action]
     if os.geteuid() != 0:
         argv = ["sudo", "-n", *argv]
-    timeout = 110 if action in ("model-smoke", "harness-smoke", "upgrade") else 90
+    timeout = 110 if action in ("model-smoke", "harness-smoke", "client-repair", "upgrade") else 90
     try:
         result = subprocess.run(argv, input=json.dumps(arguments), capture_output=True,
                                 text=True, timeout=timeout)
@@ -147,11 +147,21 @@ def register_tools(mcp):
         return invoke('harness-smoke')
 
     @mcp.tool(annotations=hints(destructive=True, open_world=True))
-    def upgrade_ops_extension(commit_sha: str, package_sha256: str) -> dict:
+    def upgrade_ops_extension(commit_sha: str, package_sha256: str,
+                              component: Literal["ops", "codex-client"] = "ops",
+                              operation: Literal["apply", "confirm", "rollback"] = "apply", change_id: str = "") -> dict:
         """Install an authorized reviewed Ops release from jiaoyuyang/jarvis origin/main.
 
         Accepts only exact commit and package hashes, verifies every fixed package file,
         preserves existing Ops tools, and schedules protected Ops reload. No arbitrary URLs.
-        Check new version/tool discovery after reconnect; this does not deploy Jarvis.
+        component=codex-client applies only the fixed reviewed client patch to a derived
+        running image, recreates Jarvis with a 180s independent rollback, then requires
+        explicit confirm(change_id) after installed-harness verification. Host checkout,
+        env, runtime version, volumes and proxy are preserved. No arbitrary Dockerfile.
         """
+        if component == 'codex-client':
+            return invoke('client-repair', commit_sha=commit_sha, package_sha256=package_sha256,
+                          operation=operation, change_id=change_id)
+        if operation != 'apply' or change_id:
+            return {'ok': False, 'error': 'invalid_ops_upgrade_operation'}
         return invoke("upgrade", commit_sha=commit_sha, package_sha256=package_sha256)

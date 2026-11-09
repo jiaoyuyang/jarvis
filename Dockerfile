@@ -20,6 +20,7 @@ RUN sed -i \
 
 COPY patches/patch_qwenpaw_codex_final_only.py /opt/jarvis/patches/patch_qwenpaw_codex_final_only.py
 COPY patches/patch_qwenpaw_codex_turn_timeout.py /opt/jarvis/patches/patch_qwenpaw_codex_turn_timeout.py
+COPY patches/patch_qwenpaw_codex_client_health.py /opt/jarvis/patches/patch_qwenpaw_codex_client_health.py
 COPY patches/patch_qwenpaw_stop_command.py /opt/jarvis/patches/patch_qwenpaw_stop_command.py
 COPY patches/patch_qwenpaw_capability_request_gate.py /opt/jarvis/patches/patch_qwenpaw_capability_request_gate.py
 COPY patches/patch_qwenpaw_capability_response_guard.py /opt/jarvis/patches/patch_qwenpaw_capability_response_guard.py
@@ -40,6 +41,8 @@ RUN /app/venv/bin/python \
         /opt/jarvis/patches/patch_qwenpaw_capability_request_gate.py \
     && /app/venv/bin/python \
         /opt/jarvis/patches/patch_qwenpaw_capability_response_guard.py \
+    && /app/venv/bin/python \
+        /opt/jarvis/patches/patch_qwenpaw_codex_client_health.py \
     && /app/venv/bin/python \
         /opt/jarvis/patches/patch_qwenpaw_dingtalk_turn_recovery.py \
     && /app/venv/bin/python \
