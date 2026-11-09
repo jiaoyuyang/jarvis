@@ -25,7 +25,7 @@ import uuid
 
 import yaml
 
-VERSION = "1.3.0"
+VERSION = "1.3.1"
 CONFIG = Path("/etc/mihomo/config.yaml")
 WIREGUARD = Path("/etc/wireguard/wg0.conf")
 STATE = Path("/var/lib/jarvis-ops-network")

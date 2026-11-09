@@ -900,6 +900,15 @@ class ExtensionTests(unittest.TestCase):
         with mock.patch.object(extension, "invoke", return_value={"ok": True}) as invoke:
             app.tools["probe_proxy_nodes"](provider="primary", limit=2)
         self.assertEqual(invoke.call_args.kwargs["limit"], 2)
+        with mock.patch.object(extension, 'invoke', return_value={'ok': True}) as invoke:
+            app.tools['ops_extension_status'](include_runtime=True)
+            invoke.assert_called_once_with('runtime-diagnostics')
+        with mock.patch.object(extension, 'invoke', return_value={'ok': True}) as invoke:
+            app.tools['model_smoke_test'](mode='harness')
+            invoke.assert_called_once_with('harness-smoke')
+        with mock.patch.object(extension, 'invoke', return_value={'ok': True}) as invoke:
+            app.tools['model_smoke_test']()
+            invoke.assert_called_once_with('model-smoke')
 
     def test_helper_has_no_shell_or_inherited_custom_command(self):
         fake = mock.Mock(returncode=0, stdout='{"ok":true,"result":{}}')

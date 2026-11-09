@@ -8,7 +8,7 @@ from typing import Literal
 from mcp.types import ToolAnnotations
 
 HELPER = "/usr/local/sbin/jarvis-network-ops"
-VERSION = "1.3.0"
+VERSION = "1.3.1"
 
 
 def hints(read_only=False, destructive=False, idempotent=False, open_world=False):
@@ -43,9 +43,13 @@ def invoke(action, **arguments):
 
 def register_tools(mcp):
     @mcp.tool(annotations=hints(read_only=True, idempotent=True))
-    def ops_extension_status() -> dict:
-        """Report this extension's version; does not prove network or model health."""
-        return invoke("extension-status")
+    def ops_extension_status(include_runtime: bool = False) -> dict:
+        """Report the version; include_runtime reads fixed sanitized Codex diagnostics.
+
+        The optional read-only diagnostic mode also works through pre-refresh clients.
+        Neither result proves model health. No arbitrary paths or commands.
+        """
+        return invoke("runtime-diagnostics" if include_runtime else "extension-status")
 
     @mcp.tool(annotations=hints(read_only=True, idempotent=True))
     def network_snapshot() -> dict:
@@ -114,13 +118,14 @@ def register_tools(mcp):
         return invoke("logs", lines=lines)
 
     @mcp.tool(annotations=hints(open_world=True))
-    def model_smoke_test() -> dict:
+    def model_smoke_test(mode: Literal["exec", "harness"] = "exec") -> dict:
         """Bounded gpt-6.1-sol/high test with existing ChatGPT OAuth and fixed prompt.
 
         Read-only agent sandbox, ephemeral independent thread, 90s inner timeout; no API key.
         Returns exit code and completed final output. Does not reuse a DingTalk conversation.
+        mode=harness tests the installed adapter with fixed parameters and RPC timings.
         """
-        return invoke("model-smoke")
+        return invoke("harness-smoke" if mode == "harness" else "model-smoke")
 
     @mcp.tool(annotations=hints(read_only=True, idempotent=True))
     def codex_runtime_diagnostics() -> dict:
