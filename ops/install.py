@@ -35,7 +35,8 @@ BEGIN = "# BEGIN JARVIS NETWORK OPS EXTENSION"
 END = "# END JARVIS NETWORK OPS EXTENSION"
 TOOL_NAMES = {"ops_extension_status", "network_snapshot", "probe_proxy_nodes", "prepare_network_change",
               "apply_network_change", "confirm_network_change", "network_change_status",
-              "rollback_network_change", "read_application_logs", "model_smoke_test", "upgrade_ops_extension"}
+              "rollback_network_change", "read_application_logs", "model_smoke_test", "upgrade_ops_extension",
+              "codex_runtime_diagnostics", "codex_harness_smoke_test"}
 
 
 def require(ok, code):
