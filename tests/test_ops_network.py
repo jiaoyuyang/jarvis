@@ -209,8 +209,9 @@ class NetworkTests(unittest.TestCase):
                 self.assertTrue(base_runner.timers)
                 if argv[-1] == 'jarvis:fixture': state['alias'] = argv[-2]
                 return ''
-            if argv[:2] == ['docker', 'build']:
+            if argv[:2] == ['docker', '--config'] and argv[3] == 'build':
                 self.assertIn('none', argv)
+                self.assertTrue(Path(argv[2]).is_relative_to(self.e.state))
                 if build_failure: raise engine.OperationError('fixture_build_failed')
                 return ''
             if argv[:3] == ['docker', 'compose', 'up']:
@@ -252,6 +253,7 @@ class NetworkTests(unittest.TestCase):
         self.assertEqual(state['alias'], 'sha256:'+'1'*64)
         self.assertFalse(any(c[:3] == ['docker', 'compose', 'up'] for c in state['calls']))
         self.assertEqual(self.e.latest_client_repair()['phase'], 'rolled_back')
+        self.assertEqual(self.e.latest_client_repair()['summary']['failed_stage'], 'building')
 
     def test_client_repair_rejects_unreviewed_release_and_restores_pending_image(self):
         state, opener = self.repair_fixture()
@@ -264,6 +266,12 @@ class NetworkTests(unittest.TestCase):
         self.assertEqual(result['phase'], 'rolled_back')
         self.assertEqual(state['image'], 'sha256:'+'1'*64)
         self.assertFalse(self.runner.timers)
+
+    def test_readonly_build_failure_is_classified_without_raw_paths_or_secrets(self):
+        error = engine.HostCommandError('docker', 1, 'mkdir /root/.docker/buildx: read-only file system TOKEN_SENTINEL')
+        self.assertEqual(error.details['reason'], 'read_only_filesystem')
+        self.assertNotIn('/root', json.dumps(error.details))
+        self.assertNotIn('TOKEN_SENTINEL', json.dumps(error.details))
 
     def test_runtime_diagnostics_uses_fixed_read_and_redacts_failed_errors(self):
         self.e.runner = mock.Mock(return_value=json.dumps({'failed_records': [
