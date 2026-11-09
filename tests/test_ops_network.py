@@ -181,6 +181,34 @@ class NetworkTests(unittest.TestCase):
     def switch(self):
         return self.e.prepare("switch_primary", *self.receipts())["id"]
 
+    def test_runtime_diagnostics_uses_fixed_read_and_redacts_failed_errors(self):
+        self.e.runner = mock.Mock(return_value=json.dumps({'failed_records': [
+            {'error': 'token="HIDDEN" https://example.invalid/secret Bearer PRIVATE'}], 'settings': {'model': 'gpt-6.1-sol'}}))
+        value = self.e.runtime_diagnostics()
+        text = json.dumps(value)
+        for secret in ('HIDDEN', 'example.invalid', 'PRIVATE'):
+            self.assertNotIn(secret, text)
+        self.assertEqual(self.config.read_text(), CONFIG)
+        self.assertEqual(self.e.runner.call_args.args[0], ['docker', 'exec', 'jarvis', 'python', '-c', engine.CODEX_DIAGNOSTIC_SCRIPT])
+        with self.assertRaises(TypeError):
+            self.e.runtime_diagnostics(path='/etc/shadow')
+        compile(engine.CODEX_DIAGNOSTIC_SCRIPT, '<diagnostic>', 'exec')
+
+    def test_harness_smoke_is_bounded_and_uses_isolated_state(self):
+        self.e.runner = mock.Mock(return_value='{"ok":false,"rpc":[{"method":"initialize","status":"TimeoutError"}]}')
+        result = self.e.harness_smoke()
+        self.assertFalse(result['ok'])
+        argv = self.e.runner.call_args.args[0]
+        self.assertEqual(argv[:8], ['docker', 'exec', 'jarvis', 'timeout', '-k', '5', '90', 'python'])
+        self.assertEqual(argv[-1], engine.CODEX_HARNESS_SCRIPT)
+        compile(engine.CODEX_HARNESS_SCRIPT, '<harness>', 'exec')
+        self.assertEqual(self.config.read_text(), CONFIG)
+        self.e.runner.return_value = 'x' * 131073
+        with self.assertRaisesRegex(engine.OperationError, 'diagnostic_response_too_large'):
+            self.e.runtime_diagnostics()
+        with self.assertRaises(TypeError):
+            self.e.harness_smoke(command='arbitrary')
+
     def test_snapshot_and_probe_never_expose_secrets(self):
         text = json.dumps([self.e.snapshot(), self.e.probe()], ensure_ascii=False)
         for secret in ("SECRET_SENTINEL", "PASSWORD_SENTINEL", "PRIVATE_KEY_SENTINEL", "PEER_PUBLIC_KEY"):
@@ -867,7 +895,7 @@ class ExtensionTests(unittest.TestCase):
                 return register
         app = FakeMCP()
         extension.register_tools(app)
-        self.assertEqual(len(app.tools), 11)
+        self.assertEqual(len(app.tools), 13)
         self.assertIn("upgrade_ops_extension", app.tools)
         with mock.patch.object(extension, "invoke", return_value={"ok": True}) as invoke:
             app.tools["probe_proxy_nodes"](provider="primary", limit=2)
@@ -899,7 +927,7 @@ class ExtensionTests(unittest.TestCase):
         extension.register_tools(app)
         tools = {t.name: t for t in asyncio.run(app.list_tools())}
         self.assertIn("original_tool", tools)
-        self.assertEqual(len(tools), 12)
+        self.assertEqual(len(tools), len(installer.TOOL_NAMES) + 1)
         self.assertEqual(set(tools), installer.TOOL_NAMES | {"original_tool"})
         tool = tools["probe_proxy_nodes"]
         schema = tool.input_schema if hasattr(tool, 'input_schema') else tool.inputSchema

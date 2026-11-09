@@ -8,7 +8,7 @@ from typing import Literal
 from mcp.types import ToolAnnotations
 
 HELPER = "/usr/local/sbin/jarvis-network-ops"
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 
 
 def hints(read_only=False, destructive=False, idempotent=False, open_world=False):
@@ -27,7 +27,7 @@ def invoke(action, **arguments):
     argv = [HELPER, action]
     if os.geteuid() != 0:
         argv = ["sudo", "-n", *argv]
-    timeout = 110 if action in ("model-smoke", "upgrade") else 90
+    timeout = 110 if action in ("model-smoke", "harness-smoke", "upgrade") else 90
     try:
         result = subprocess.run(argv, input=json.dumps(arguments), capture_output=True,
                                 text=True, timeout=timeout)
@@ -121,6 +121,25 @@ def register_tools(mcp):
         Returns exit code and completed final output. Does not reuse a DingTalk conversation.
         """
         return invoke("model-smoke")
+
+    @mcp.tool(annotations=hints(read_only=True, idempotent=True))
+    def codex_runtime_diagnostics() -> dict:
+        """Read fixed backend settings, source hashes, process metadata and failed records.
+
+        No normal chat, OAuth contents, full command lines or arbitrary paths. Does not
+        inspect live Python memory or restart/modify the production adapter.
+        """
+        return invoke('runtime-diagnostics')
+
+    @mcp.tool(annotations=hints(open_world=True))
+    def codex_harness_smoke_test() -> dict:
+        """Test installed adapter startup, generation and resume in temporary isolated state.
+
+        Existing OAuth; fixed gpt-6.1-sol/high; read-only sandbox and no approval grants.
+        Two bounded stages with RPC timings. No projected tools or DingTalk session;
+        production adapter/process/config untouched. A pass is not DingTalk acceptance.
+        """
+        return invoke('harness-smoke')
 
     @mcp.tool(annotations=hints(destructive=True, open_world=True))
     def upgrade_ops_extension(commit_sha: str, package_sha256: str) -> dict:

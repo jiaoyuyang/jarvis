@@ -25,7 +25,7 @@ import uuid
 
 import yaml
 
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 CONFIG = Path("/etc/mihomo/config.yaml")
 WIREGUARD = Path("/etc/wireguard/wg0.conf")
 STATE = Path("/var/lib/jarvis-ops-network")
@@ -133,7 +133,7 @@ def broker(args, raw):
     require(1 <= len(args) <= 2 and len(raw) <= 65536, "invalid_command")
     action = args[0]
     allowed = {"snapshot", "probe", "prepare", "apply", "confirm", "rollback", "status", "logs",
-               "model-smoke", "extension-status", "upgrade", "rollback-auto"}
+               "model-smoke", "runtime-diagnostics", "harness-smoke", "extension-status", "upgrade", "rollback-auto"}
     require(action in allowed, "unsupported_operation")
     data = json.loads(raw or b"{}")
     require(isinstance(data, dict), "invalid_request")
@@ -289,6 +289,175 @@ def scoped_candidate(text, changes):
     candidate = yaml.safe_dump(expected, allow_unicode=True, sort_keys=False)
     require(yaml.safe_load(candidate) == expected, 'normalized_yaml_scope_mismatch')
     return candidate, True
+
+
+CODEX_DIAGNOSTIC_SCRIPT = r'''
+import ast
+import asyncio
+import hashlib
+import importlib.util
+import json
+import tomllib
+from pathlib import Path
+
+root = Path('/app/working/workspaces/default')
+out = {'scope': 'Fixed runtime metadata and failed records only; no normal chat, credentials or process arguments.'}
+config = json.loads((root / 'agent.json').read_text())
+settings = config.get('backend_settings') or {}
+out['settings'] = {k: settings.get(k) for k in ('model', 'reasoning_effort', 'sandbox', 'approval_policy', 'turn_timeout_seconds', 'final_only')}
+out['sources'] = {}
+for name in ('adapter', 'app_server', 'projection'):
+    spec = importlib.util.find_spec('qwenpaw.harnesses.codex.' + name)
+    raw = Path(spec.origin).read_bytes()
+    text = raw.decode()
+    tree = ast.parse(text)
+    methods = {node.name: ast.get_source_segment(text, node) or '' for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    entry = {'sha256': hashlib.sha256(raw).hexdigest()}
+    if name == 'app_server':
+        start = methods.get('start', '')
+        entry.update(reader_health_checked_on_start='_reader_task' in start.split('resolution =')[0],
+                     explicit_stream_limit='limit=' in start or 'limit =' in start,
+                     python_default_stream_limit=asyncio.streams._DEFAULT_LIMIT,
+                     bounded_initialization='wait_for' in start,
+                     stderr_details_discarded='Codex app-server emitted stderr output' in methods.get('_read_stderr', ''))
+    if name == 'adapter':
+        entry['timeout_patch_v2'] = 'JARVIS_CODEX_TURN_TIMEOUT_PATCH_V2' in text
+        entry['prepare_calls'] = [n.args[0].value for n in ast.walk(tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == 'request' and n.args and isinstance(n.args[0], ast.Constant) and isinstance(n.args[0].value, str) and n.args[0].value in ('skills/extraRoots/set', 'thread/start', 'thread/resume')]
+    out['sources'][name] = entry
+native = Path('/root/.codex/config.toml')
+if native.is_file() and native.stat().st_size <= 1048576:
+    try:
+        data = tomllib.loads(native.read_text())
+        out['native_config'] = {k: data.get(k) for k in ('model', 'model_provider', 'approval_policy', 'sandbox_mode')}
+        out['native_config']['mcp_servers'] = [{'name': name, 'enabled': value.get('enabled', True),
+            'transport': 'stdio' if value.get('command') else 'http'} for name, value in (data.get('mcp_servers') or {}).items() if isinstance(value, dict)]
+    except (ValueError, OSError):
+        out['native_config'] = {'error': 'unavailable'}
+out['processes'] = []
+for folder in list(Path('/proc').iterdir())[:2048]:
+    if not folder.name.isdigit():
+        continue
+    try:
+        args = (folder / 'cmdline').read_bytes().split(b'\0')
+        is_codex = any(Path(a.decode(errors='replace')).name == 'codex' for a in args[:2])
+        is_qwen = any(b'qwenpaw' in a for a in args[:3])
+        if not (is_codex or is_qwen):
+            continue
+        fields = dict(line.split(':', 1) for line in (folder / 'status').read_text().splitlines() if ':' in line)
+        out['processes'].append({'pid': int(folder.name), 'kind': 'app-server' if b'app-server' in args else 'codex-exec' if is_codex else 'qwenpaw',
+            'ppid': fields.get('PPid', '').strip(), 'uid': fields.get('Uid', '').strip(),
+            'state': fields.get('State', '').strip(), 'rss': fields.get('VmRSS', '').strip()})
+    except (OSError, ValueError):
+        continue
+out['thread_maps'] = []
+for path in list(root.rglob('codex_sessions.json'))[:4]:
+    if path.is_file() and path.stat().st_size <= 1048576:
+        value = json.loads(path.read_text())
+        out['thread_maps'].append({'entries': len(value) if isinstance(value, dict) else None, 'bytes': path.stat().st_size})
+out['failed_records'] = []
+session_root = root / 'sessions/dingtalk'
+paths = sorted(session_root.glob('*.json'), key=lambda p: p.stat().st_mtime, reverse=True)[:8]
+for path in paths:
+    if path.stat().st_size > 4194304:
+        continue
+    data = json.loads(path.read_text())
+    context = (((data.get('agent') or {}).get('state') or {}).get('context') or [])
+    for message in context[-100:]:
+        if not isinstance(message, dict) or (message.get('metadata') or {}).get('status') != 'failed':
+            continue
+        content = message.get('content') or []
+        blocks = [{'text': content}] if isinstance(content, str) else content
+        texts = [str(b.get('text') or '') for b in blocks if isinstance(b, dict) and b.get('type', 'text') == 'text']
+        out['failed_records'].append({'session_hash': hashlib.sha256(path.name.encode()).hexdigest()[:16],
+            'timestamp': message.get('timestamp'), 'error': '\n'.join(texts)[-2000:]})
+out['failed_records'] = out['failed_records'][-8:]
+print(json.dumps(out, ensure_ascii=False))
+'''
+
+CODEX_HARNESS_SCRIPT = r'''
+import asyncio
+import json
+import tempfile
+import time
+from pathlib import Path
+from qwenpaw.harnesses.codex import adapter as module
+from qwenpaw.harnesses.codex.app_server import CodexAppServerClient
+
+records = []
+clients = []
+origin = time.monotonic()
+
+class TracedClient(CodexAppServerClient):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        clients.append(self)
+    async def request(self, method, params=None):
+        entry = {'method': method, 'started': round(time.monotonic() - origin, 2)}
+        records.append(entry)
+        try:
+            value = await super().request(method, params)
+            entry['status'] = 'ok'
+            return value
+        except BaseException as error:
+            entry['status'] = type(error).__name__
+            raise
+        finally:
+            entry['seconds'] = round(time.monotonic() - origin - entry['started'], 2)
+
+module.CodexAppServerClient = TracedClient
+
+async def main():
+    results = []
+    with tempfile.TemporaryDirectory(prefix='jarvis-ops-harness-') as state:
+        adapter = module.CodexAdapter(Path(state))
+        settings = {'model': 'gpt-6.1-sol', 'reasoning_effort': 'high', 'sandbox': 'read-only',
+                    'approval_policy': 'never', 'final_only': True, 'turn_timeout_seconds': 35}
+        try:
+            for stage in ('new_thread', 'resume_after_restart'):
+                start = time.monotonic()
+                answer = []
+                complete = False
+                failure = None
+                try:
+                    async def consume():
+                        nonlocal complete
+                        async for event in adapter.run_turn(session_id='jarvis-ops-isolated-smoke',
+                                prompt='只回复：模型连通测试通过。不要调用工具、读取文件或执行命令。',
+                                cwd=Path('/app/working/workspaces/default'), settings=settings):
+                            kind = str(getattr(event.kind, 'value', event.kind))
+                            if 'text_delta' in kind.lower():
+                                answer.append(str(getattr(event, 'text', '') or ''))
+                            if kind.lower() == 'completed':
+                                complete = True
+                            if kind.lower() in ('error', 'cancelled'):
+                                raise RuntimeError(str(getattr(event, 'text', '') or kind))
+                    await asyncio.wait_for(consume(), timeout=38)
+                except Exception as error:
+                    failure = type(error).__name__ + ': ' + str(error)[:1000]
+                actual = ''.join(answer).strip()
+                ok = complete and actual.rstrip('。.!！') == '模型连通测试通过'
+                results.append({'stage': stage, 'ok': ok, 'completed': complete,
+                    'seconds': round(time.monotonic() - start, 2), 'answer': actual if ok else '', 'error': failure})
+                try:
+                    await asyncio.wait_for(adapter.stop(), timeout=6)
+                except Exception as error:
+                    results[-1]['cleanup_error'] = type(error).__name__
+                    break
+                if not ok:
+                    break
+        finally:
+            for client in clients:
+                process = client._process
+                try:
+                    await asyncio.wait_for(client.stop(), timeout=2)
+                except Exception:
+                    if process is not None and process.returncode is None:
+                        process.kill()
+    print(json.dumps({'ok': len(results) == 2 and all(r['ok'] for r in results),
+        'tests': results, 'rpc': records[-30:], 'scope': 'Independent temporary adapter and thread; production process/session untouched; no projected tools; read-only sandbox and approvals never.'}, ensure_ascii=False))
+
+asyncio.run(main())
+'''
 
 
 class Controller:
@@ -842,6 +1011,27 @@ class Engine:
             for name, content in data.items()}
         return {"logs": selected, "scope": "recent matching application log lines"}
 
+    @staticmethod
+    def sanitized_result(value):
+        if isinstance(value, str):
+            return redact(value)
+        if isinstance(value, list):
+            return [Engine.sanitized_result(item) for item in value]
+        if isinstance(value, dict):
+            return {key: Engine.sanitized_result(item) for key, item in value.items()}
+        return value
+
+    def runtime_diagnostics(self):
+        raw = self.runner(['docker', 'exec', 'jarvis', 'python', '-c', CODEX_DIAGNOSTIC_SCRIPT], timeout=25)
+        require(len(raw) <= 131072, 'diagnostic_response_too_large')
+        return self.sanitized_result(json.loads(raw))
+
+    def harness_smoke(self):
+        raw = self.runner(['docker', 'exec', 'jarvis', 'timeout', '-k', '5', '90',
+                           'python', '-c', CODEX_HARNESS_SCRIPT], timeout=100)
+        require(len(raw) <= 131072, 'diagnostic_response_too_large')
+        return self.sanitized_result(json.loads(raw))
+
     def model_smoke(self):
         exe = "/app/venv/lib/python3.11/site-packages/codex_cli_bin/bin/codex"
         work = self.runner(["docker", "exec", "jarvis", "mktemp", "-d", "/tmp/jarvis-ops-smoke.XXXXXX"])
@@ -898,6 +1088,7 @@ def worker_main():
     methods = {"snapshot": engine.snapshot, "probe": engine.probe, "prepare": engine.prepare,
                "apply": engine.apply, "confirm": engine.confirm, "rollback": engine.rollback,
                "status": engine.status, "logs": engine.application_logs, "model-smoke": engine.model_smoke,
+               "runtime-diagnostics": engine.runtime_diagnostics, "harness-smoke": engine.harness_smoke,
                "extension-status": engine.extension_status}
     require(action in methods, "unsupported_operation")
     return methods[action](**data)
